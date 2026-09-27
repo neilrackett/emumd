@@ -1,0 +1,678 @@
+#!/usr/bin/env python3
+# Copyright (C) 2026 Neil Rackett
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""mdfw - build SidecarTridge Multi-device firmware for md-emulator.
+
+A .mdfw is a firmware's own C sources, a small glue file and the
+md-emulator runtime, built for this computer as one shared library that
+the patched Hatari loads with --md-firmware (or as its last argument).
+mdfw.ini in the firmware's repository says which sources to use.
+
+  mdfw init [DIR]          add mdfw.ini and emu/mdfw_app.c to a firmware
+  mdfw build               build the .mdfw that mdfw.ini describes
+  mdfw run [FILE.mdfw]     run it in Hatari (builds first without FILE)
+  mdfw info FILE.mdfw      say what a .mdfw is
+  mdfw cart IMAGE          turn a cartridge image into a C array
+  mdfw hatari              build the Hatari that loads .mdfw files
+  mdfw skill install       give coding agents the md-emulator skill
+"""
+
+import argparse
+import concurrent.futures
+import configparser
+import ctypes
+import glob
+import hashlib
+import os
+import platform
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+RUNTIME = os.path.join(ROOT, "runtime")
+PLUGIN_ABI = 1
+SKILL = os.path.join(ROOT, "skills", "md-emulator")
+REPO_URL = "https://github.com/neilrackett/md-emulator.git"
+
+# The patched Hatari is built once per user, not inside each project (where
+# md-emulator is typically a submodule); build-hatari.sh uses the same place.
+CACHE = os.environ.get("MDEMU_CACHE") or os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "md-emulator")
+HATARI_SRC = os.path.join(CACHE, "hatari")
+DEFAULT_HATARI = os.path.join(HATARI_SRC, "build", "src", "hatari")
+# What the patched Hatari is built from: build-hatari.sh stores their SHA-1
+# as .md-emulator-stamp, so a Hatari older than this md-emulator is spotted.
+HATARI_INPUTS = ["hatari/hatari-multidevice.patch", "hatari/multidevice.c",
+                 "hatari/multidevice.h", "include/mdemu_plugin.h"]
+
+
+def fail(msg):
+    sys.stderr.write("mdfw: %s\n" % msg)
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# mdfw.ini
+# ---------------------------------------------------------------------------
+
+class Project:
+    """mdfw.ini, with every path made absolute."""
+
+    def __init__(self, path):
+        if not os.path.isfile(path):
+            fail("no %s here (make one with: mdfw init)" % path)
+        self.ini = os.path.abspath(path)
+        self.dir = os.path.dirname(self.ini)
+        cp = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=(";",))
+        cp.read(self.ini)
+        self.cp = cp
+        self.name = self.get("firmware", "name") or os.path.basename(self.dir)
+        self.version = self.get("firmware", "version")
+        slug = "".join(c if c.isalnum() or c in "-_." else "-" for c in self.name.lower())
+        self.output = self.path(self.get("firmware", "output") or "build/%s.mdfw" % slug)
+        self.build_dir = self.path(self.get("firmware", "build_dir") or "build/mdfw")
+        self.sources = self.globs(self.lines("sources", "files"))
+        excluded = set(self.globs(self.lines("sources", "exclude"), must_match=False))
+        self.sources = [s for s in self.sources if s not in excluded]
+        self.shims = [self.path(p) for p in self.lines("compile", "shims")]
+        self.includes = [self.path(p) for p in self.lines("compile", "include")]
+        self.defines = self.lines("compile", "defines")
+        self.cflags = shlex.split(self.get("compile", "cflags") or "-O2")
+        self.ldflags = shlex.split(self.get("compile", "ldflags") or "")
+
+    def get(self, section, key):
+        return self.cp.get(section, key, fallback="").strip()
+
+    def lines(self, section, key):
+        return [l.strip() for l in self.get(section, key).splitlines() if l.strip()]
+
+    def path(self, p):
+        return os.path.normpath(os.path.join(self.dir, os.path.expanduser(p)))
+
+    def globs(self, patterns, must_match=True):
+        out = []
+        for pat in patterns:
+            hits = sorted(glob.glob(self.path(pat), recursive=True))
+            if not hits and must_match:
+                fail("%s: nothing matches %r" % (os.path.basename(self.ini), pat))
+            out.extend(h for h in hits if h not in out)
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Building
+# ---------------------------------------------------------------------------
+
+def compiler():
+    return shlex.split(os.environ.get("CC", "cc"))
+
+
+def compile_flags(proj):
+    flags = ["-std=gnu11", "-fPIC", "-fvisibility=hidden", "-g", "-Wall",
+             "-Wno-unused-function", "-Wno-missing-braces"] + proj.cflags
+    # Your shims, then the runtime's (they replace the Pico SDK, FatFs and
+    # the templates' debug.h, even where your include folders have their
+    # hardware versions), then your include folders.
+    for inc in (proj.shims + [os.path.join(RUNTIME, "shim"), os.path.join(ROOT, "include")]
+                + proj.includes + [RUNTIME]):
+        flags.append("-I" + inc)
+    flags.append('-DMDFW_NAME="%s"' % proj.name.replace('"', '\\"'))
+    if proj.version:
+        flags.append('-DMDFW_VERSION="%s"' % proj.version.replace('"', '\\"'))
+    flags.append("-DMDEMU=1")
+    for d in proj.defines:
+        flags.append("-D" + d)
+    return flags
+
+
+def object_for(proj, src):
+    rel = os.path.relpath(src, ROOT if src.startswith(RUNTIME + os.sep) else proj.dir)
+    rel = rel.replace("..", "_up").replace(os.sep, "__")
+    sub = "runtime" if src.startswith(RUNTIME + os.sep) else "src"
+    return os.path.join(proj.build_dir, sub, os.path.splitext(rel)[0] + ".o")
+
+
+def out_of_date(obj, src):
+    if not os.path.exists(obj):
+        return True
+    t = os.path.getmtime(obj)
+    if os.path.getmtime(src) > t:
+        return True
+    dep = obj[:-2] + ".d"
+    if not os.path.exists(dep):
+        return True
+    with open(dep) as f:
+        text = f.read().replace("\\\n", " ")
+    # "obj.o: src.c a.h b.h" then, from -MP, "a.h:" lines; the first line
+    # has everything.
+    first = text.split("\n", 1)[0]
+    for name in first.split(":", 1)[-1].split():
+        if not os.path.exists(name) or os.path.getmtime(name) > t:
+            return True
+    return False
+
+
+def build(proj, verbose=False, jobs=None, clean=False):
+    runtime_srcs = sorted(glob.glob(os.path.join(RUNTIME, "*.c")))
+    srcs = proj.sources + runtime_srcs
+    if not proj.sources:
+        fail("%s lists no sources" % os.path.basename(proj.ini))
+    flags = compile_flags(proj)
+    os.makedirs(proj.build_dir, exist_ok=True)
+
+    # Rebuild everything when the flags change.
+    stamp = os.path.join(proj.build_dir, "flags")
+    digest = hashlib.sha1(" ".join(compiler() + flags).encode()).hexdigest()
+    old = open(stamp).read() if os.path.exists(stamp) else ""
+    force = clean or old != digest
+
+    work = []
+    for src in srcs:
+        obj = object_for(proj, src)
+        if force or out_of_date(obj, src):
+            work.append((src, obj))
+
+    def cc(item):
+        src, obj = item
+        os.makedirs(os.path.dirname(obj), exist_ok=True)
+        cmd = compiler() + flags + ["-MMD", "-MP", "-c", src, "-o", obj]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        return src, cmd, r
+
+    failed = False
+    with concurrent.futures.ThreadPoolExecutor(jobs or os.cpu_count() or 4) as pool:
+        for src, cmd, r in pool.map(cc, work):
+            print("  CC   %s" % os.path.relpath(
+                src, ROOT if src.startswith(RUNTIME + os.sep) else proj.dir))
+            if verbose:
+                print("       " + " ".join(shlex.quote(c) for c in cmd))
+            if r.stdout or r.stderr:
+                sys.stderr.write(r.stdout + r.stderr)
+            if r.returncode:
+                failed = True
+    if failed:
+        fail("compile failed")
+    with open(stamp, "w") as f:
+        f.write(digest)
+
+    objs = [object_for(proj, s) for s in srcs]
+    newest = max(os.path.getmtime(o) for o in objs)
+    if not work and os.path.exists(proj.output) and os.path.getmtime(proj.output) >= newest:
+        print("  %s is up to date" % os.path.relpath(proj.output))
+        return proj.output
+
+    os.makedirs(os.path.dirname(proj.output), exist_ok=True)
+    link = compiler() + ["-shared", "-o", proj.output] + objs + proj.ldflags + ["-lpthread"]
+    if platform.system() == "Linux":
+        # Keep the firmware's symbols to itself, and report missing ones now.
+        link += ["-Wl,-Bsymbolic", "-Wl,-z,defs"]
+    print("  LINK %s" % os.path.relpath(proj.output))
+    if verbose:
+        print("       " + " ".join(shlex.quote(c) for c in link))
+    r = subprocess.run(link, capture_output=True, text=True)
+    if r.returncode:
+        sys.stderr.write(r.stdout + r.stderr)
+        if "ndefined" in r.stderr:
+            sys.stderr.write(
+                "\nmdfw: the firmware calls functions the runtime does not provide.\n"
+                "Leave the sources that set up hardware out of mdfw.ini, and define\n"
+                "any other missing function in your glue file (or a shim .c).\n")
+        fail("link failed")
+    return proj.output
+
+
+# ---------------------------------------------------------------------------
+# Looking at a .mdfw
+# ---------------------------------------------------------------------------
+
+class _Plugin(ctypes.Structure):
+    _fields_ = [("abi", ctypes.c_uint32), ("name", ctypes.c_char_p),
+                ("version", ctypes.c_char_p)]
+
+
+def describe(path):
+    """(abi, name, version) of a .mdfw, or raise."""
+    lib = ctypes.CDLL(os.path.abspath(path), mode=getattr(ctypes, "RTLD_LOCAL", 0))
+    entry = lib.mdemu_plugin_v1
+    entry.restype = ctypes.POINTER(_Plugin)
+    p = entry().contents
+    return p.abi, p.name.decode(errors="replace"), (p.version or b"").decode(errors="replace")
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+INI_TEMPLATE = """\
+; mdfw.ini - how md-emulator builds this firmware for the host (mdfw build).
+; Paths are relative to this file; globs such as src/*.c are fine.
+
+[firmware]
+name = {name}
+version = v0.0.0
+; output = build/{slug}.mdfw
+
+[sources]
+; The firmware's logic, plus the glue file. Leave out whatever sets up
+; hardware (PIO, DMA, the SD card driver, clocks, Wi-Fi, main.c): the
+; runtime stands in for it.
+files =
+    emu/mdfw_app.c
+;   rp/src/*.c
+exclude =
+;   rp/src/main.c
+
+[compile]
+; Your own stand-ins for hardware-only headers (a constants.h with flash
+; addresses, say). Searched first, then md-emulator's own (Pico SDK,
+; FatFs, debug.h), then the include folders.
+shims =
+;   emu/shim
+include =
+;   rp/src/include
+defines =
+;   RELEASE_VERSION="emu"
+cflags = -O2
+
+[run]
+; Defaults for mdfw run.
+; sd = sd              ; folder standing in for the microSD card
+; tos = /path/to/tos.img
+; machine = megaste
+; harddrive =          ; a GEMDOS drive C: (off by default, so the
+;                      ; firmware's cartridge boots)
+; options =            ; --md-option key=value, one per line
+; hatari_args =
+"""
+
+APP_TEMPLATE = """\
+/*
+ * mdfw_app.c - {name} for md-emulator: what the firmware's main() does
+ * after its hardware set-up, and one pass of its main loop.
+ */
+#include "mdfw.h"
+#include "pico/stdlib.h"
+
+/* The cartridge image your target/ build embeds, as ST words, e.g.
+ * #include "target_firmware.h" */
+
+static int app_init(void) {
+  /* mdfw_rom4_load(target_firmware, target_firmware_length); */
+  /* commemul_init(); your_protocol_init(mdfw_rom4_base()); ... */
+  mdfw_log("hello from %s", MDFW_NAME);
+  return 0;
+}
+
+static bool app_poll(void) {
+  /* One pass of the main loop; return true if there was work. */
+  return false;
+}
+
+const mdfw_app_t mdfw_app = {
+    .name = MDFW_NAME,
+#ifdef MDFW_VERSION
+    .version = MDFW_VERSION,
+#endif
+    .init = app_init,
+    .poll = app_poll,
+};
+"""
+
+
+def cmd_init(args):
+    d = os.path.abspath(args.dir)
+    name = args.name or os.path.basename(d)
+    slug = "".join(c if c.isalnum() or c in "-_." else "-" for c in name.lower())
+    made = []
+    ini = os.path.join(d, "mdfw.ini")
+    app = os.path.join(d, "emu", "mdfw_app.c")
+    fill = lambda t: t.replace("{name}", name).replace("{slug}", slug)
+    for path, text in ((ini, fill(INI_TEMPLATE)), (app, fill(APP_TEMPLATE))):
+        if os.path.exists(path):
+            print("  kept %s (already there)" % os.path.relpath(path))
+            continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+        made.append(path)
+        print("  made %s" % os.path.relpath(path))
+    if made:
+        print("Next: list your sources in mdfw.ini, fill in emu/mdfw_app.c, then: mdfw build")
+    root = git_root(d) or d
+    if not (ROOT + os.sep).startswith(root + os.sep):
+        print("To pin md-emulator in this project (recommended), from %s:\n"
+              "  git submodule add %s emu/md-emulator\n"
+              "and then use emu/md-emulator/tools/mdfw." % (root, REPO_URL))
+    print("For coding agents: mdfw skill install")
+
+
+def git_root(path):
+    r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"],
+                       capture_output=True, text=True)
+    return os.path.realpath(r.stdout.strip()) if r.returncode == 0 else None
+
+
+def project_from(args):
+    return Project(args.file or "mdfw.ini")
+
+
+def cmd_build(args):
+    proj = project_from(args)
+    if args.output:
+        proj.output = os.path.abspath(args.output)
+    out = build(proj, args.verbose, args.jobs, args.clean)
+    abi, name, version = describe(out)
+    print("%s: %s %s" % (os.path.relpath(out), name, version))
+
+
+def hatari_path(args, proj=None):
+    for p in (args.hatari, os.environ.get("MDEMU_HATARI"),
+              proj.get("run", "hatari") if proj else "", DEFAULT_HATARI):
+        if p:
+            p = proj.path(p) if (proj and not os.path.isabs(p)) else p
+            if os.path.exists(p):
+                return p
+    fail("no Hatari that loads .mdfw files; build one with: mdfw hatari")
+
+
+def hatari_inputs_hash():
+    h = hashlib.sha1()
+    for rel in HATARI_INPUTS:
+        with open(os.path.join(ROOT, rel), "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()
+
+
+def warn_if_stale(hatari):
+    """Say so if this Hatari was built from another md-emulator."""
+    stamp = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(hatari))),
+                         ".md-emulator-stamp")
+    if not os.path.exists(stamp):
+        return
+    with open(stamp) as f:
+        if f.read().strip() != hatari_inputs_hash():
+            sys.stderr.write("mdfw: this Hatari was built from a different md-emulator; "
+                             "rebuild it with: mdfw hatari\n")
+
+
+def last_avi_frame(avi, png):
+    """Hatari records PNG frames ('00dc' chunks): keep the last one."""
+    with open(avi, "rb") as f:
+        data = f.read()
+    last = None
+    i = data.find(b"00dc")
+    while i >= 0:
+        size = int.from_bytes(data[i + 4:i + 8], "little")
+        body = data[i + 8:i + 8 + size]
+        if body[:8] == b"\x89PNG\r\n\x1a\n":
+            last = body
+        i = data.find(b"00dc", i + 8)
+    if not last:
+        return False
+    with open(png, "wb") as f:
+        f.write(last)
+    return True
+
+
+def cmd_run(args):
+    proj = None
+    if args.firmware:
+        firmware = os.path.abspath(args.firmware)
+        if os.path.exists("mdfw.ini") and not args.file:
+            proj = Project("mdfw.ini")
+    else:
+        proj = project_from(args)
+        firmware = build(proj, args.verbose, None, False)
+    if args.file and not proj:
+        proj = Project(args.file)
+
+    def setting(opt, key):
+        if opt is not None:
+            return opt
+        return proj.get("run", key) if proj else ""
+
+    def as_path(p):
+        return proj.path(p) if proj and not os.path.isabs(p) else os.path.abspath(p)
+
+    hatari = hatari_path(args, proj)
+    warn_if_stale(hatari)
+    cmd = [hatari]
+    env = dict(os.environ)
+    tos = setting(args.tos, "tos")
+    if tos:
+        cmd += ["--tos", as_path(tos)]
+    machine = setting(args.machine, "machine")
+    if machine:
+        cmd += ["--machine", machine]
+    hd = setting(args.harddrive, "harddrive")
+    if hd:
+        cmd += ["--harddrive", as_path(hd)]
+    else:
+        cmd += ["--harddrive", "none"]  # so the firmware's cartridge boots
+    sd = setting(args.sd, "sd")
+    if sd:
+        cmd += ["--md-sd", as_path(sd)]
+    options = list(proj.lines("run", "options")) if proj else []
+    options += args.option or []
+    for o in options:
+        cmd += ["--md-option", o]
+    if args.md_verbose:
+        cmd += ["--md-verbose", "on"]
+
+    frames = args.frames or (500 if args.headless else 0)
+    tmp = None
+    if args.headless:
+        env["SDL_VIDEODRIVER"] = "dummy"
+        env["SDL_AUDIODRIVER"] = "dummy"
+        cmd += ["--sound", "off", "--fast-boot", "on", "--fast-forward", "on"]
+    if frames:
+        cmd += ["--run-vbls", str(frames)]
+    if args.screenshot or args.no_user_config:
+        tmp = tempfile.mkdtemp(prefix="mdfw-run-")
+    if args.screenshot:
+        cmd += ["--avirecord", "--avi-vcodec", "png",
+                "--avi-file", os.path.join(tmp, "screen.avi")]
+    if args.no_user_config:
+        env["HOME"] = tmp  # Hatari's own config lives under $HOME
+
+    if proj:
+        cmd += shlex.split(proj.get("run", "hatari_args"))
+    cmd += args.hatari_args
+    cmd += ["--md-firmware", firmware]
+    print(" ".join(shlex.quote(c) for c in cmd), flush=True)
+
+    if not (frames or args.screenshot or args.log or tmp):
+        os.execve(cmd[0], cmd, env)
+
+    # Run it to the end (or the time limit), keeping what it says.
+    log = open(args.log, "w") if args.log else None
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, errors="replace")
+    import threading
+    timer = threading.Timer(args.timeout, proc.kill) if args.timeout else None
+    if timer:
+        timer.start()
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        if log:
+            log.write(line)
+    rc = proc.wait()
+    if timer:
+        timer.cancel()
+    if log:
+        log.close()
+    if args.screenshot:
+        if last_avi_frame(os.path.join(tmp, "screen.avi"), args.screenshot):
+            print("screenshot: %s" % args.screenshot)
+        else:
+            sys.stderr.write("mdfw: no frame recorded for the screenshot\n")
+            rc = rc or 1
+    if tmp:
+        shutil.rmtree(tmp, ignore_errors=True)
+    sys.exit(rc if rc and rc > 0 else 0)
+
+
+def cmd_info(args):
+    try:
+        abi, name, version = describe(args.firmware)
+    except (OSError, AttributeError) as e:
+        fail("%s is not a .mdfw this computer can load (%s)" % (args.firmware, e))
+    print("%s\n  name:      %s\n  version:   %s\n  interface: %d%s" % (
+        args.firmware, name, version or "-", abi,
+        "" if abi == PLUGIN_ABI else " (this md-emulator speaks %d)" % PLUGIN_ABI))
+
+
+def cmd_cart(args):
+    """A cartridge image (raw bytes as the ST sees them) as a C array of ST
+    words, for mdfw_rom4_load()."""
+    data = open(args.image, "rb").read()
+    if len(data) > 0x10000:
+        fail("%s is %d bytes; ROM4 holds 65536" % (args.image, len(data)))
+    if len(data) % 2:
+        data += b"\0"
+    words = [(data[i] << 8) | data[i + 1] for i in range(0, len(data), 2)]
+    while words and words[-1] == 0:
+        words.pop()
+    name = args.name
+    out = ["/* %s as ST words (mdfw cart). */" % os.path.basename(args.image),
+           "#include <stdint.h>",
+           "static const uint16_t %s[] __attribute__((aligned(4))) = {" % name]
+    for i in range(0, len(words), 12):
+        out.append("    " + ", ".join("0x%04x" % w for w in words[i:i + 12]) + ",")
+    out += ["};", "static const unsigned %s_length = %d;" % (name, len(words)), ""]
+    text = "\n".join(out)
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(text)
+        print("  %s: %d words" % (args.output, len(words)))
+    else:
+        sys.stdout.write(text)
+
+
+def cmd_skill(args):
+    if args.action == "path":
+        print(SKILL)
+        return
+    if args.user:
+        base = os.path.join(os.path.expanduser("~"), ".claude", "skills")
+        root = None
+    else:
+        start = os.path.abspath(args.dir)
+        root = git_root(start) or start
+        base = os.path.join(root, ".claude", "skills")
+    dest = os.path.join(base, "md-emulator")
+    if os.path.islink(dest):
+        os.unlink(dest)
+    elif os.path.exists(dest):
+        if not args.force:
+            fail("%s already exists (use --force to replace it)" % dest)
+        shutil.rmtree(dest)
+    os.makedirs(base, exist_ok=True)
+    if args.copy:
+        shutil.copytree(SKILL, dest)
+        how = "copied"
+    else:
+        # Relative inside a project, so it works in every clone when
+        # md-emulator is a submodule; absolute for --user.
+        target = SKILL if args.user else os.path.relpath(SKILL, base)
+        os.symlink(target, dest)
+        how = "linked"
+    print("  %s %s -> %s" % (how, dest, SKILL))
+    real_skill = os.path.realpath(SKILL)
+    if root and not args.copy and not real_skill.startswith(root + os.sep):
+        print("  Note: md-emulator is outside this project, so other clones will not\n"
+              "  have the skill. Add md-emulator as a submodule, or use --copy.")
+
+
+def cmd_hatari(args):
+    script = os.path.join(ROOT, "hatari", "build-hatari.sh")
+    cmd = [script] + ([os.path.abspath(args.src)] if args.src else [])
+    r = subprocess.run(cmd)
+    sys.exit(r.returncode)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="mdfw", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="command", metavar="command")
+
+    p = sub.add_parser("init", help="add mdfw.ini and a glue file to a firmware")
+    p.add_argument("dir", nargs="?", default=".")
+    p.add_argument("--name", help="firmware name (default: the folder's)")
+    p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("build", help="build the .mdfw described by mdfw.ini")
+    p.add_argument("-f", "--file", help="the project file (default: ./mdfw.ini)")
+    p.add_argument("-o", "--output", help="where to write the .mdfw")
+    p.add_argument("-j", "--jobs", type=int, help="parallel compiles")
+    p.add_argument("-v", "--verbose", action="store_true", help="show commands")
+    p.add_argument("--clean", action="store_true", help="rebuild everything")
+    p.set_defaults(func=cmd_build)
+
+    p = sub.add_parser("run", help="run a .mdfw in Hatari")
+    p.add_argument("firmware", nargs="?", help=".mdfw file (default: build mdfw.ini's)")
+    p.add_argument("-f", "--file", help="the project file (default: ./mdfw.ini)")
+    p.add_argument("--sd", help="folder standing in for the microSD card")
+    p.add_argument("--tos", help="TOS image")
+    p.add_argument("--machine", help="st, ste, megaste, ...")
+    p.add_argument("--harddrive", help="GEMDOS drive C: folder (default: none)")
+    p.add_argument("-O", "--option", action="append", metavar="KEY=VALUE",
+                   help="pass --md-option KEY=VALUE (repeatable)")
+    p.add_argument("-V", "--md-verbose", action="store_true",
+                   help="show the firmware's debug output")
+    p.add_argument("--hatari", help="the Hatari to use")
+    p.add_argument("--headless", action="store_true",
+                   help="no window or sound, as fast as possible (500 frames unless --frames)")
+    p.add_argument("--frames", type=int, metavar="N", help="quit after N frames (VBLs)")
+    p.add_argument("--screenshot", metavar="PNG", help="save the last frame as a PNG")
+    p.add_argument("--log", metavar="FILE", help="also save Hatari's output to FILE")
+    p.add_argument("--timeout", type=float, metavar="SECONDS",
+                   help="stop Hatari after this long, whatever happens")
+    p.add_argument("--no-user-config", action="store_true",
+                   help="ignore your own Hatari settings (give --tos then)")
+    p.add_argument("-v", "--verbose", action="store_true", help="show build commands")
+    p.set_defaults(func=cmd_run)
+    p.epilog = "Anything after -- goes to Hatari as it is."
+
+    p = sub.add_parser("info", help="say what a .mdfw is")
+    p.add_argument("firmware")
+    p.set_defaults(func=cmd_info)
+
+    p = sub.add_parser("cart", help="turn a cartridge image into a C array")
+    p.add_argument("image", help="raw cartridge image (bytes as the ST reads them)")
+    p.add_argument("-o", "--output", help="header to write (default: stdout)")
+    p.add_argument("-n", "--name", default="cart_image", help="array name")
+    p.set_defaults(func=cmd_cart)
+
+    p = sub.add_parser("skill", help="give coding agents the md-emulator skill")
+    p.add_argument("action", choices=["install", "path"],
+                   help="install it, or print where it is")
+    p.add_argument("dir", nargs="?", default=".", help="project (default: here)")
+    p.add_argument("--user", action="store_true",
+                   help="for all your projects (~/.claude/skills), not just this one")
+    p.add_argument("--copy", action="store_true", help="copy instead of linking")
+    p.add_argument("--force", action="store_true", help="replace an existing copy")
+    p.set_defaults(func=cmd_skill)
+
+    p = sub.add_parser("hatari", help="build the Hatari that loads .mdfw files")
+    p.add_argument("--src", help="Hatari source folder (default: %s)" % HATARI_SRC)
+    p.set_defaults(func=cmd_hatari)
+
+    argv = sys.argv[1:]
+    extra = []
+    if "--" in argv:
+        extra = argv[argv.index("--") + 1:]
+        argv = argv[:argv.index("--")]
+    args = ap.parse_args(argv)
+    if not getattr(args, "func", None):
+        ap.print_help()
+        sys.exit(1)
+    args.hatari_args = extra
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

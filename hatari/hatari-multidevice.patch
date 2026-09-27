@@ -1,0 +1,414 @@
+SidecarTridge Multi-device support for Hatari 2.6.1 (md-emulator).
+Options --md-firmware/--md-sd/--md-option/--md-verbose, a [MultiDevice]
+config section, a .mdfw as the last argument, and the cartridge bank
+that routes ROM3/ROM4 to the firmware. build-hatari.sh applies it and
+adds multidevice.c, multidevice.h and mdemu_plugin.h.
+
+diff -ruN a/src/configuration.c b/src/configuration.c
+--- a/src/configuration.c
++++ b/src/configuration.c
+@@ -484,6 +484,17 @@
+ 	{ NULL , Error_Tag, NULL }
+ };
+ 
++/* Used to load/save SidecarTridge Multi-device options */
++static const struct Config_Tag configs_MultiDevice[] =
++{
++	{ "bEnabled", Bool_Tag, &ConfigureParams.MultiDevice.bEnabled },
++	{ "szFirmwareFileName", String_Tag, ConfigureParams.MultiDevice.szFirmwareFileName },
++	{ "szSdCardDirectory", String_Tag, ConfigureParams.MultiDevice.szSdCardDirectory },
++	{ "szOptions", String_Tag, ConfigureParams.MultiDevice.szOptions },
++	{ "bVerbose", Bool_Tag, &ConfigureParams.MultiDevice.bVerbose },
++	{ NULL , Error_Tag, NULL }
++};
++
+ /* Used to load/save LILO options, names are same as with Aranym */
+ static const struct Config_Tag configs_Lilo[] =
+ {
+@@ -841,6 +852,13 @@
+ 	ConfigureParams.Rom.bPatchTos = true;
+ 	strcpy(ConfigureParams.Rom.szCartridgeImageFileName, "");
+ 
++	/* Set defaults for SidecarTridge Multi-device */
++	ConfigureParams.MultiDevice.bEnabled = false;
++	ConfigureParams.MultiDevice.bVerbose = false;
++	strcpy(ConfigureParams.MultiDevice.szFirmwareFileName, "");
++	strcpy(ConfigureParams.MultiDevice.szSdCardDirectory, "");
++	strcpy(ConfigureParams.MultiDevice.szOptions, "");
++
+ 	/* Set defaults for Lilo */
+ 	strcpy(ConfigureParams.Lilo.szCommandLine,
+ 	       "root=/dev/ram video=atafb:vga16 load_ramdisk=1");
+@@ -997,6 +1015,13 @@
+ 	File_MakeAbsoluteName(ConfigureParams.Rom.szTosImageFileName);
+ 	if (strlen(ConfigureParams.Rom.szCartridgeImageFileName) > 0)
+ 		File_MakeAbsoluteName(ConfigureParams.Rom.szCartridgeImageFileName);
++	if (strlen(ConfigureParams.MultiDevice.szFirmwareFileName) > 0)
++		File_MakeAbsoluteName(ConfigureParams.MultiDevice.szFirmwareFileName);
++	if (strlen(ConfigureParams.MultiDevice.szSdCardDirectory) > 0)
++	{
++		File_CleanFileName(ConfigureParams.MultiDevice.szSdCardDirectory);
++		File_MakeAbsoluteName(ConfigureParams.MultiDevice.szSdCardDirectory);
++	}
+ 	if (strlen(ConfigureParams.Lilo.szKernelFileName) > 0)
+ 		File_MakeAbsoluteName(ConfigureParams.Lilo.szKernelFileName);
+ 	if (strlen(ConfigureParams.Lilo.szKernelSymbols) > 0)
+@@ -1147,6 +1172,7 @@
+ 	Configuration_LoadSection(psFileName, configs_Scsi, "[SCSI]");
+ 	Configuration_LoadSection(psFileName, configs_Ide, "[IDE]");
+ 	Configuration_LoadSection(psFileName, configs_Rom, "[ROM]");
++	Configuration_LoadSection(psFileName, configs_MultiDevice, "[MultiDevice]");
+ 	Configuration_LoadSection(psFileName, configs_Lilo, "[LILO]");
+ 	Configuration_LoadSection(psFileName, configs_Rs232, "[RS232]");
+ 	Configuration_LoadSection(psFileName, configs_Printer, "[Printer]");
+@@ -1210,6 +1236,7 @@
+ 	Configuration_SaveSection(sConfigFileName, configs_Scsi, "[SCSI]");
+ 	Configuration_SaveSection(sConfigFileName, configs_Ide, "[IDE]");
+ 	Configuration_SaveSection(sConfigFileName, configs_Rom, "[ROM]");
++	Configuration_SaveSection(sConfigFileName, configs_MultiDevice, "[MultiDevice]");
+ 	Configuration_SaveSection(sConfigFileName, configs_Lilo, "[LILO]");
+ 	Configuration_SaveSection(sConfigFileName, configs_Rs232, "[RS232]");
+ 	Configuration_SaveSection(sConfigFileName, configs_Printer, "[Printer]");
+diff -ruN a/src/cpu/memory.c b/src/cpu/memory.c
+--- a/src/cpu/memory.c
++++ b/src/cpu/memory.c
+@@ -30,6 +30,7 @@
+ #include "video.h"
+ 
+ #include "newcpu.h"
++#include "multidevice.h"
+ 
+ 
+ /* Set illegal_mem to 1 for debug output: */
+@@ -1191,6 +1192,81 @@
+     TTmem_lget, TTmem_wget, ABFLAG_RAM | ABFLAG_DIRECTACCESS	/* NP TODO : use ABFLAG_RAM_TT for non DMA RAM */
+ };
+ 
++/* SidecarTridge Multi-device on the cartridge port: ROM4 ($FA0000-$FAFFFF)
++ * reads come from the firmware's window, ROM3 ($FB0000-$FBFFFF) reads are
++ * handed to it as commands (multidevice.c). When Hatari's own cartridge
++ * program is needed (GEMDOS drive, VDI modes), it keeps the first 1 KB. */
++#define MDEV_HATARI_CART_END 0xfa0400
++static bool MDEV_KeepHatariCart;
++static uae_u8 MDEV_Shadow[0x10000];
++
++static bool MDEV_IsHatariCart(uaecptr addr)
++{
++	return MDEV_KeepHatariCart && addr < MDEV_HATARI_CART_END;
++}
++
++static uae_u32 REGPARAM3 MDEVmem_wget(uaecptr addr)
++{
++	addr &= 0xffffff;
++	if (MDEV_IsHatariCart(addr))
++		return ROMmem_wget(addr);
++	if (addr < 0xfb0000)
++		return MultiDevice_Rom4Read(addr - 0xfa0000);
++	MultiDevice_Rom3Read(addr - 0xfb0000);
++	return 0xffff;			/* the Multi-device does not drive ROM3 reads */
++}
++
++static uae_u32 REGPARAM3 MDEVmem_lget(uaecptr addr)
++{
++	return (MDEVmem_wget(addr) << 16) | MDEVmem_wget(addr + 2);
++}
++
++static uae_u32 REGPARAM3 MDEVmem_bget(uaecptr addr)
++{
++	addr &= 0xffffff;
++	if (MDEV_IsHatariCart(addr))
++		return ROMmem_bget(addr);
++	if (addr < 0xfb0000)
++	{
++		uae_u32 w = MultiDevice_Rom4Read((addr & ~1) - 0xfa0000);
++		return (addr & 1) ? (w & 0xff) : (w >> 8);
++	}
++	MultiDevice_Rom3Read(addr - 0xfb0000);
++	return 0xff;
++}
++
++static int REGPARAM3 MDEVmem_check(uaecptr addr, uae_u32 size)
++{
++	addr &= 0xffffff;
++	if (MDEV_IsHatariCart(addr))
++		return ROMmem_check(addr, size);
++	return addr + size <= 0xfc0000;
++}
++
++/* Direct pointers (the debugger, DMA) see a snapshot of ROM4. */
++static uae_u8 * REGPARAM3 MDEVmem_xlate(uaecptr addr)
++{
++	int i;
++	addr &= 0xffffff;
++	if (MDEV_IsHatariCart(addr) || addr >= 0xfb0000)
++		return ROMmem_xlate(addr);
++	for (i = 0; i < 0x10000; i += 2)
++	{
++		uae_u32 w = MultiDevice_Rom4Read(i);
++		MDEV_Shadow[i] = w >> 8;
++		MDEV_Shadow[i + 1] = w & 0xff;
++	}
++	return MDEV_Shadow + (addr - 0xfa0000);
++}
++
++static addrbank MDEVmem_bank =
++{
++    MDEVmem_lget, MDEVmem_wget, MDEVmem_bget,
++    ROMmem_lput, ROMmem_wput, ROMmem_bput,
++    MDEVmem_xlate, MDEVmem_check, NULL, "md_mem" , "Multi-device cartridge",
++    MDEVmem_lget, MDEVmem_wget, ABFLAG_ROM
++};
++
+ static addrbank ROMmem_bank =
+ {
+     ROMmem_lget, ROMmem_wget, ROMmem_bget,
+@@ -1794,6 +1870,18 @@
+ 	ROMmem_bank.mask = ROMmem_mask;
+ 	ROMmem_bank.start = ROMmem_start;
+ 	init_bank ( &ROMmem_bank , ROMmem_size );
++
++	/* SidecarTridge Multi-device firmware on the cartridge port */
++	if (MultiDevice_IsActive())
++	{
++		MDEV_KeepHatariCart = MultiDevice_KeepsHatariCartridge();
++		/* Hatari writes its cartridge program's variables (the old GEMDOS
++		 * vector) through baseaddr, so that stays the real cartridge ROM. */
++		MDEVmem_bank.baseaddr = ROMmemory;
++		MDEVmem_bank.mask = ROMmem_mask;
++		MDEVmem_bank.start = ROMmem_start;
++		map_banks_ce(&MDEVmem_bank, 0xFA0000 >> 16, 0x2, 0, CE_MEMBANK_FAST16, CE_MEMBANK_NOT_CACHABLE);
++	}
+ 
+ 	/* IO memory: */
+ 	map_banks_ce(&IOmem_bank, IOmem_start>>16, 0x1, 0, CE_MEMBANK_FAST16, CE_MEMBANK_NOT_CACHABLE);	/* [NP] tested on real STF, no bus wait for IO memory */
+diff -ruN a/src/includes/configuration.h b/src/includes/configuration.h
+--- a/src/includes/configuration.h
++++ b/src/includes/configuration.h
+@@ -52,6 +52,17 @@
+ } CNF_ROM;
+ 
+ 
++/* SidecarTridge Multi-device configuration (firmware built with md-emulator) */
++typedef struct
++{
++  bool bEnabled;
++  bool bVerbose;
++  char szFirmwareFileName[FILENAME_MAX];
++  char szSdCardDirectory[FILENAME_MAX];
++  char szOptions[FILENAME_MAX];		/* key=value pairs separated by ';' */
++} CNF_MULTIDEVICE;
++
++
+ /* LILO (Linux loader) configuration */
+ typedef struct
+ {
+@@ -432,6 +443,7 @@
+   CNF_SCSIDEV Scsi[MAX_SCSI_DEVS];
+   CNF_IDEDEV Ide[MAX_IDE_DEVS];
+   CNF_ROM Rom;
++  CNF_MULTIDEVICE MultiDevice;
+   CNF_LILO Lilo;
+   CNF_RS232 RS232;
+   CNF_PRINTER Printer;
+diff -ruN a/src/main.c b/src/main.c
+--- a/src/main.c
++++ b/src/main.c
+@@ -13,6 +13,7 @@
+ #include <SDL.h>
+ 
+ #include "main.h"
++#include "multidevice.h"
+ #include "version.h"
+ #include "configuration.h"
+ #include "control.h"
+@@ -862,6 +863,7 @@
+  */
+ static void Main_UnInit(void)
+ {
++	MultiDevice_UnInit();
+ 	Screen_ReturnFromFullScreen();
+ 	Floppy_UnInit();
+ 	HDC_UnInit();
+diff -ruN a/src/options.c b/src/options.c
+--- a/src/options.c
++++ b/src/options.c
+@@ -22,6 +22,7 @@
+ #include "main.h"
+ #include "version.h"
+ #include "options.h"
++#include "multidevice.h"
+ #include "configuration.h"
+ #include "console.h"
+ #include "control.h"
+@@ -174,6 +175,11 @@
+ 	OPT_PATCHTOS,
+ 	OPT_CARTRIDGE,
+ 
++	OPT_MD_FIRMWARE,	/* SidecarTridge Multi-device options */
++	OPT_MD_SD,
++	OPT_MD_OPTION,
++	OPT_MD_VERBOSE,
++
+ 	OPT_CPULEVEL,		/* CPU options */
+ 	OPT_CPUCLOCK,
+ 	OPT_COMPATIBLE,
+@@ -445,6 +451,16 @@
+ 	{ OPT_CARTRIDGE, NULL, "--cartridge",
+ 	  "<file>", "Use ROM cartridge image <file>" },
+ 
++	{ OPT_HEADER, NULL, NULL, NULL, "SidecarTridge Multi-device" },
++	{ OPT_MD_FIRMWARE, NULL, "--md-firmware",
++	  "<file>", "Run Multi-device firmware <file> (.mdfw) on the cartridge port" },
++	{ OPT_MD_SD, NULL, "--md-sd",
++	  "<dir>", "Use <dir> as the Multi-device's microSD card" },
++	{ OPT_MD_OPTION, NULL, "--md-option",
++	  "<key=value>", "Pass an option to the Multi-device firmware (repeatable, 'none' clears)" },
++	{ OPT_MD_VERBOSE, NULL, "--md-verbose",
++	  "<bool>", "Show the Multi-device firmware's debug output" },
++
+ 	{ OPT_HEADER, NULL, NULL, NULL, "CPU/FPU/bus" },
+ 	{ OPT_CPULEVEL,  NULL, "--cpulevel",
+ 	  "<x>", "Set the CPU type (x => 680x0) (EmuTOS/TOS 2.06 only!)" },
+@@ -662,7 +678,7 @@
+ 	const opt_t *opt = HatariOptions;
+ 
+ 	Opt_ShowVersion();
+-	printf("Usage:\n hatari [options] [directory|disk image|Atari program]\n");
++	printf("Usage:\n hatari [options] [directory|disk image|Atari program|Multi-device firmware]\n");
+ 
+ 	while(opt->id != OPT_ERROR)
+ 	{
+@@ -988,6 +1004,31 @@
+ 
+ 
+ /**
++ * Add a --md-option key=value pair; "none" clears them all. Pairs are
++ * kept separated by ';', which the config file can hold.
++ */
++static bool Opt_AddMultiDeviceOption(const char *pair)
++{
++	char *opts = ConfigureParams.MultiDevice.szOptions;
++	size_t len = strlen(opts);
++
++	if (strcasecmp(pair, "none") == 0)
++	{
++		opts[0] = '\0';
++		return true;
++	}
++	if (strchr(pair, ';') || !pair[0])
++		return Opt_ShowError(OPT_MD_OPTION, pair, "Must be key=value, without ';'");
++	if (len + strlen(pair) + 2 > sizeof(ConfigureParams.MultiDevice.szOptions))
++		return Opt_ShowError(OPT_MD_OPTION, pair, "Too many Multi-device options");
++	if (len)
++		strcat(opts, ";");
++	strcat(opts, pair);
++	return true;
++}
++
++
++/**
+  * Do final validation for the earlier + parsed options
+  *
+  * Return false if they fail validation.
+@@ -1036,6 +1077,16 @@
+ {
+ 	char *dir = NULL;
+ 
++	/* SidecarTridge Multi-device firmware (.mdfw)? */
++	if (MultiDevice_IsFirmwareFile(path) && File_Exists(path))
++	{
++		Log_Printf(LOG_DEBUG, "ARG = Multi-device firmware: %s\n", path);
++		bLoadAutoSave = false;
++		return Opt_StrCpy(OPT_MD_FIRMWARE, CHECK_FILE, ConfigureParams.MultiDevice.szFirmwareFileName,
++				  path, sizeof(ConfigureParams.MultiDevice.szFirmwareFileName),
++				  &ConfigureParams.MultiDevice.bEnabled);
++	}
++
+ 	/* Atari program? */
+ 	if (Opt_IsAtariProgram(path))
+ 	{
+@@ -1101,7 +1152,7 @@
+ 		return true;
+ 	}
+ 
+-	return Opt_ShowError(OPT_ERROR, path, "Not a disk image, Atari program or directory");
++	return Opt_ShowError(OPT_ERROR, path, "Not a disk image, Atari program, directory or Multi-device firmware");
+ }
+ 
+ /**
+@@ -1840,6 +1891,34 @@
+ 			{
+ 				bLoadAutoSave = false;
+ 			}
++			break;
++
++		/* SidecarTridge Multi-device options */
++		case OPT_MD_FIRMWARE:
++			i += 1;
++			ok = Opt_StrCpy(OPT_MD_FIRMWARE, CHECK_FILE, ConfigureParams.MultiDevice.szFirmwareFileName,
++					argv[i], sizeof(ConfigureParams.MultiDevice.szFirmwareFileName),
++					&ConfigureParams.MultiDevice.bEnabled);
++			if (ok)
++			{
++				bLoadAutoSave = false;
++			}
++			break;
++
++		case OPT_MD_SD:
++			i += 1;
++			ok = Opt_StrCpy(OPT_MD_SD, CHECK_DIR, ConfigureParams.MultiDevice.szSdCardDirectory,
++					argv[i], sizeof(ConfigureParams.MultiDevice.szSdCardDirectory),
++					NULL);
++			break;
++
++		case OPT_MD_OPTION:
++			i += 1;
++			ok = Opt_AddMultiDeviceOption(argv[i]);
++			break;
++
++		case OPT_MD_VERBOSE:
++			ok = Opt_Bool(argv[++i], OPT_MD_VERBOSE, &ConfigureParams.MultiDevice.bVerbose);
+ 			break;
+ 
+ 		case OPT_MEMSTATE:
+diff -ruN a/src/reset.c b/src/reset.c
+--- a/src/reset.c
++++ b/src/reset.c
+@@ -29,6 +29,7 @@
+ #include "blitter.h"
+ #include "psg.h"
+ #include "reset.h"
++#include "multidevice.h"
+ #include "scc.h"
+ #include "screen.h"
+ #include "scu_vme.h"
+@@ -52,6 +53,9 @@
+ {
+ 	/* Ensure MMU has default values before calling memory_init() later */
+ 	STMemory_Reset ( bCold );
++
++	/* A cold reset powers the SidecarTridge Multi-device off and on */
++	MultiDevice_Reset ( bCold );
+ 
+ 	if (bCold)
+ 	{
+diff -ruN a/src/video.c b/src/video.c
+--- a/src/video.c
++++ b/src/video.c
+@@ -454,6 +454,7 @@
+ #include "stMemory.h"
+ #include "vdi.h"
+ #include "video.h"
++#include "multidevice.h"
+ #include "ymFormat.h"
+ #include "falcon/videl.h"
+ #include "blitter.h"
+@@ -5049,6 +5050,8 @@
+ 	/* try to access it to process the VBL interrupt and read the vector's address (especially when using MMU)) */
+ 	if ( quit_program == 0 )
+ 		M68000_Exception(EXCEPTION_NR_VBLANK, M68000_EXC_SRC_AUTOVEC);	/* Vertical blank interrupt, level 4 */
++
++	MultiDevice_VBL();			/* let the Multi-device firmware run */
+ 
+ 	Main_WaitOnVbl();
+ }
