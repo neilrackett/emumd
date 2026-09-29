@@ -2,6 +2,8 @@ build/
 examples/*/build/
 examples/*/cart/cart.bin
 __pycache__/
+.kilo/
+.claude/
 *.o
 *.d
 .DS_Store
