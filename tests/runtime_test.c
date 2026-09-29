@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * File: runtime_test.c
- * Description: Checks the md-emulator runtime on its own: the plugin
+ * Description: Checks the EmuMD runtime on its own: the plugin
  *              interface, ROM3/ROM4, options, flash rules, FatFs on a
  *              host folder and core 1 as a thread.
  *
@@ -13,7 +13,7 @@
 
 #include "ff.h"
 #include "hardware/flash.h"
-#include "mdemu_plugin.h"
+#include "emumd_plugin.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 
@@ -71,16 +71,16 @@ static void core1_echo(void) {
 }
 
 int main(int argc, char **argv) {
-  const char *sd = argc > 1 ? argv[1] : "/tmp/mdemu-test";
+  const char *sd = argc > 1 ? argv[1] : "/tmp/emumd-test";
   char path[1024];
   mkdir(sd, 0777);
   snprintf(path, sizeof(path), "%s/Rott", sd);
   mkdir(path, 0777);
 
-  const mdemu_plugin_t *p = mdemu_plugin_v1();
-  CHECK(p->abi == MDEMU_PLUGIN_ABI);
+  const emumd_plugin_t *p = emumd_plugin_v1();
+  CHECK(p->abi == EMUMD_PLUGIN_ABI);
   CHECK(strcmp(p->name, "test") == 0);
-  const mdemu_host_t host = {MDEMU_PLUGIN_ABI, sd, "a=1\nb=hello world\nflag\nb=last\nempty=",
+  const emumd_host_t host = {EMUMD_PLUGIN_ABI, sd, "a=1\nb=hello world\nflag\nb=last\nempty=",
                              1, host_log};
   CHECK(p->power_on(&host, 1000) == 0);
 

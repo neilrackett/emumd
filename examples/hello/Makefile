@@ -1,4 +1,4 @@
-# hello: the md-emulator example firmware.
+# hello: the EmuMD example firmware.
 # Copyright (C) 2026 Neil Rackett
 # SPDX-License-Identifier: GPL-3.0-or-later
 #

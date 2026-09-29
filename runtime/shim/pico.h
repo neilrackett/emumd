@@ -4,7 +4,7 @@
  *
  * File: pico.h
  * Description: Host stand-in for the Pico SDK's base header, so firmware
- *              code builds unchanged for md-emulator. Only what firmware
+ *              code builds unchanged for EmuMD. Only what firmware
  *              logic commonly uses; hardware set-up belongs outside the
  *              .mdfw build (see docs/GUIDE.md). Add headers of your own in
  *              your project's shims folder for anything missing.

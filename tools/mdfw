@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Neil Rackett
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""mdfw - build SidecarTridge Multi-device firmware for md-emulator.
+"""mdfw - build SidecarTridge Multi-device firmware for EmuMD.
 
 A .mdfw is a firmware's own C sources, a small glue file and the
-md-emulator runtime, built for this computer as one shared library that
+EmuMD runtime, built for this computer as one shared library that
 the patched Hatari loads with --md-firmware (or as its last argument).
 mdfw.ini in the firmware's repository says which sources to use.
 
@@ -14,7 +14,7 @@ mdfw.ini in the firmware's repository says which sources to use.
   mdfw info FILE.mdfw      say what a .mdfw is
   mdfw cart IMAGE          turn a cartridge image into a C array
   mdfw hatari              build the Hatari that loads .mdfw files
-  mdfw skill install       give coding agents the md-emulator skill
+  mdfw skill install       give coding agents the EmuMD skill
 """
 
 import argparse
@@ -34,19 +34,19 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 RUNTIME = os.path.join(ROOT, "runtime")
 PLUGIN_ABI = 1
-SKILL = os.path.join(ROOT, "skills", "md-emulator")
-REPO_URL = "https://github.com/neilrackett/md-emulator.git"
+SKILL = os.path.join(ROOT, "skills", "emumd")
+REPO_URL = "https://github.com/neilrackett/emumd.git"
 
 # The patched Hatari is built once per user, not inside each project (where
-# md-emulator is typically a submodule); build-hatari.sh uses the same place.
-CACHE = os.environ.get("MDEMU_CACHE") or os.path.join(
-    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "md-emulator")
+# EmuMD is typically a submodule); build-hatari.sh uses the same place.
+CACHE = os.environ.get("EMUMD_CACHE") or os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "emumd")
 HATARI_SRC = os.path.join(CACHE, "hatari")
 DEFAULT_HATARI = os.path.join(HATARI_SRC, "build", "src", "hatari")
 # What the patched Hatari is built from: build-hatari.sh stores their SHA-1
-# as .md-emulator-stamp, so a Hatari older than this md-emulator is spotted.
+# as .emumd-stamp, so a Hatari older than this EmuMD is spotted.
 HATARI_INPUTS = ["hatari/hatari-multidevice.patch", "hatari/multidevice.c",
-                 "hatari/multidevice.h", "include/mdemu_plugin.h"]
+                 "hatari/multidevice.h", "include/emumd_plugin.h"]
 
 
 def fail(msg):
@@ -122,7 +122,7 @@ def compile_flags(proj):
     flags.append('-DMDFW_NAME="%s"' % proj.name.replace('"', '\\"'))
     if proj.version:
         flags.append('-DMDFW_VERSION="%s"' % proj.version.replace('"', '\\"'))
-    flags.append("-DMDEMU=1")
+    flags.append("-DEMUMD=1")
     for d in proj.defines:
         flags.append("-D" + d)
     return flags
@@ -236,7 +236,7 @@ class _Plugin(ctypes.Structure):
 def describe(path):
     """(abi, name, version) of a .mdfw, or raise."""
     lib = ctypes.CDLL(os.path.abspath(path), mode=getattr(ctypes, "RTLD_LOCAL", 0))
-    entry = lib.mdemu_plugin_v1
+    entry = lib.emumd_plugin_v1
     entry.restype = ctypes.POINTER(_Plugin)
     p = entry().contents
     return p.abi, p.name.decode(errors="replace"), (p.version or b"").decode(errors="replace")
@@ -247,7 +247,7 @@ def describe(path):
 # ---------------------------------------------------------------------------
 
 INI_TEMPLATE = """\
-; mdfw.ini - how md-emulator builds this firmware for the host (mdfw build).
+; mdfw.ini - how EmuMD builds this firmware for the host (mdfw build).
 ; Paths are relative to this file; globs such as src/*.c are fine.
 
 [firmware]
@@ -267,7 +267,7 @@ exclude =
 
 [compile]
 ; Your own stand-ins for hardware-only headers (a constants.h with flash
-; addresses, say). Searched first, then md-emulator's own (Pico SDK,
+; addresses, say). Searched first, then EmuMD's own (Pico SDK,
 ; FatFs, debug.h), then the include folders.
 shims =
 ;   emu/shim
@@ -290,7 +290,7 @@ cflags = -O2
 
 APP_TEMPLATE = """\
 /*
- * mdfw_app.c - {name} for md-emulator: what the firmware's main() does
+ * mdfw_app.c - {name} for EmuMD: what the firmware's main() does
  * after its hardware set-up, and one pass of its main loop.
  */
 #include "mdfw.h"
@@ -343,9 +343,9 @@ def cmd_init(args):
         print("Next: list your sources in mdfw.ini, fill in emu/mdfw_app.c, then: mdfw build")
     root = git_root(d) or d
     if not (ROOT + os.sep).startswith(root + os.sep):
-        print("To pin md-emulator in this project (recommended), from %s:\n"
-              "  git submodule add %s emu/md-emulator\n"
-              "and then use emu/md-emulator/tools/mdfw." % (root, REPO_URL))
+        print("To pin EmuMD in this project (recommended), from %s:\n"
+              "  git submodule add %s emu/emumd\n"
+              "and then use emu/emumd/tools/mdfw." % (root, REPO_URL))
     print("For coding agents: mdfw skill install")
 
 
@@ -369,7 +369,7 @@ def cmd_build(args):
 
 
 def hatari_path(args, proj=None):
-    for p in (args.hatari, os.environ.get("MDEMU_HATARI"),
+    for p in (args.hatari, os.environ.get("EMUMD_HATARI"),
               proj.get("run", "hatari") if proj else "", DEFAULT_HATARI):
         if p:
             p = proj.path(p) if (proj and not os.path.isabs(p)) else p
@@ -387,14 +387,14 @@ def hatari_inputs_hash():
 
 
 def warn_if_stale(hatari):
-    """Say so if this Hatari was built from another md-emulator."""
+    """Say so if this Hatari was built from another version of EmuMD."""
     stamp = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(hatari))),
-                         ".md-emulator-stamp")
+                         ".emumd-stamp")
     if not os.path.exists(stamp):
         return
     with open(stamp) as f:
         if f.read().strip() != hatari_inputs_hash():
-            sys.stderr.write("mdfw: this Hatari was built from a different md-emulator; "
+            sys.stderr.write("mdfw: this Hatari was built from a different version of EmuMD; "
                              "rebuild it with: mdfw hatari\n")
 
 
@@ -522,7 +522,7 @@ def cmd_info(args):
         fail("%s is not a .mdfw this computer can load (%s)" % (args.firmware, e))
     print("%s\n  name:      %s\n  version:   %s\n  interface: %d%s" % (
         args.firmware, name, version or "-", abi,
-        "" if abi == PLUGIN_ABI else " (this md-emulator speaks %d)" % PLUGIN_ABI))
+        "" if abi == PLUGIN_ABI else " (this EmuMD speaks %d)" % PLUGIN_ABI))
 
 
 def cmd_cart(args):
@@ -563,7 +563,7 @@ def cmd_skill(args):
         start = os.path.abspath(args.dir)
         root = git_root(start) or start
         base = os.path.join(root, ".claude", "skills")
-    dest = os.path.join(base, "md-emulator")
+    dest = os.path.join(base, "emumd")
     if os.path.islink(dest):
         os.unlink(dest)
     elif os.path.exists(dest):
@@ -576,15 +576,15 @@ def cmd_skill(args):
         how = "copied"
     else:
         # Relative inside a project, so it works in every clone when
-        # md-emulator is a submodule; absolute for --user.
+        # EmuMD is a submodule; absolute for --user.
         target = SKILL if args.user else os.path.relpath(SKILL, base)
         os.symlink(target, dest)
         how = "linked"
     print("  %s %s -> %s" % (how, dest, SKILL))
     real_skill = os.path.realpath(SKILL)
     if root and not args.copy and not real_skill.startswith(root + os.sep):
-        print("  Note: md-emulator is outside this project, so other clones will not\n"
-              "  have the skill. Add md-emulator as a submodule, or use --copy.")
+        print("  Note: EmuMD is outside this project, so other clones will not\n"
+              "  have the skill. Add EmuMD as a submodule, or use --copy.")
 
 
 def cmd_hatari(args):
@@ -647,7 +647,7 @@ def main():
     p.add_argument("-n", "--name", default="cart_image", help="array name")
     p.set_defaults(func=cmd_cart)
 
-    p = sub.add_parser("skill", help="give coding agents the md-emulator skill")
+    p = sub.add_parser("skill", help="give coding agents the EmuMD skill")
     p.add_argument("action", choices=["install", "path"],
                    help="install it, or print where it is")
     p.add_argument("dir", nargs="?", default=".", help="project (default: here)")

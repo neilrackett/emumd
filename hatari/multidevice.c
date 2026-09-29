@@ -5,8 +5,8 @@
  * or at your option any later version. Read the file gpl.txt for details.
  *
  * SidecarTridge Multi-device on the cartridge port. The firmware is a
- * .mdfw: its C sources built for the host with md-emulator's runtime, as a
- * shared library (see mdemu_plugin.h). ROM4 reads ($FA0000-$FAFFFF) come
+ * .mdfw: its C sources built for the host with EmuMD's runtime, as a
+ * shared library (see emumd_plugin.h). ROM4 reads ($FA0000-$FAFFFF) come
  * from the firmware's 64 KB window, ROM3 reads ($FB0000-$FBFFFF) are
  * handed to it as commands. memory.c routes the accesses here.
  *
@@ -26,13 +26,13 @@ const char MultiDevice_fileid[] = "Hatari multidevice.c";
 #include "file.h"
 #include "log.h"
 #include "m68000.h"
-#include "mdemu_plugin.h"
+#include "emumd_plugin.h"
 #include "multidevice.h"
 
 static void *hLibrary;
-static const mdemu_plugin_t *pPlugin;
+static const emumd_plugin_t *pPlugin;
 static bool bPoweredOn;
-static mdemu_host_t Host;
+static emumd_host_t Host;
 
 static void MultiDevice_Log(const char *line)
 {
@@ -64,7 +64,7 @@ static bool MultiDevice_PowerOn(void)
 {
 	if (!pPlugin || bPoweredOn)
 		return bPoweredOn;
-	Host.abi = MDEMU_PLUGIN_ABI;
+	Host.abi = EMUMD_PLUGIN_ABI;
 	Host.sd_dir = ConfigureParams.MultiDevice.szSdCardDirectory[0]
 	              ? ConfigureParams.MultiDevice.szSdCardDirectory : NULL;
 	Host.options = ConfigureParams.MultiDevice.szOptions;
@@ -89,7 +89,7 @@ static void MultiDevice_PowerOff(void)
 bool MultiDevice_Init(void)
 {
 	const char *path = ConfigureParams.MultiDevice.szFirmwareFileName;
-	mdemu_plugin_entry_t entry;
+	emumd_plugin_entry_t entry;
 
 	if (pPlugin)
 		return true;
@@ -100,7 +100,7 @@ bool MultiDevice_Init(void)
 	{
 		Log_AlertDlg(LOG_ERROR, "Multi-device: '%s' is a .uf2. Running .uf2 files "
 		             "is not supported yet; build the firmware as a .mdfw with "
-		             "md-emulator's 'mdfw build'.", path);
+		             "EmuMD's 'mdfw build'.", path);
 		return false;
 	}
 	if (!File_Exists(path))
@@ -115,13 +115,13 @@ bool MultiDevice_Init(void)
 		             path, dlerror());
 		return false;
 	}
-	entry = (mdemu_plugin_entry_t)dlsym(hLibrary, MDEMU_PLUGIN_ENTRY);
+	entry = (emumd_plugin_entry_t)dlsym(hLibrary, EMUMD_PLUGIN_ENTRY);
 	pPlugin = entry ? entry() : NULL;
-	if (!pPlugin || pPlugin->abi != MDEMU_PLUGIN_ABI)
+	if (!pPlugin || pPlugin->abi != EMUMD_PLUGIN_ABI)
 	{
 		Log_AlertDlg(LOG_ERROR, "'%s' is not a Multi-device firmware for this "
 		             "Hatari (interface %u, need %u).", path,
-		             pPlugin ? pPlugin->abi : 0, MDEMU_PLUGIN_ABI);
+		             pPlugin ? pPlugin->abi : 0, EMUMD_PLUGIN_ABI);
 		pPlugin = NULL;
 		dlclose(hLibrary);
 		hLibrary = NULL;

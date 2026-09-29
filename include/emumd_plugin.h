@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * File: mdemu_plugin.h
+ * File: emumd_plugin.h
  * Description: The interface between an emulator (Hatari, patched by
  *              hatari/) and a SidecarTridge Multi-device firmware built
  *              for the host as a .mdfw plugin (a shared library).
@@ -19,37 +19,37 @@
  * this same file; build-hatari.sh copies it into Hatari's sources.
  */
 
-#ifndef MDEMU_PLUGIN_H
-#define MDEMU_PLUGIN_H
+#ifndef EMUMD_PLUGIN_H
+#define EMUMD_PLUGIN_H
 
 #include <stdint.h>
 
 /* Bumped on any incompatible change to the structures below. */
-#define MDEMU_PLUGIN_ABI 1
+#define EMUMD_PLUGIN_ABI 1
 
-/* The symbol every plugin exports: const mdemu_plugin_t *mdemu_plugin_v1(void) */
-#define MDEMU_PLUGIN_ENTRY "mdemu_plugin_v1"
+/* The symbol every plugin exports: const emumd_plugin_t *emumd_plugin_v1(void) */
+#define EMUMD_PLUGIN_ENTRY "emumd_plugin_v1"
 
 /* What the emulator gives the firmware at power-on. */
 typedef struct {
-  uint32_t abi;        /* MDEMU_PLUGIN_ABI */
+  uint32_t abi;        /* EMUMD_PLUGIN_ABI */
   const char *sd_dir;  /* host folder standing in for the microSD card, or NULL */
   const char *options; /* the user's --md-option key=value pairs, one per line */
   int verbose;         /* show the firmware's debug output */
   /* The emulator's log; one line of text, no trailing newline needed. */
   void (*log)(const char *line);
-} mdemu_host_t;
+} emumd_host_t;
 
 /* What the plugin gives the emulator. `now_us` is emulated time since the
  * emulator started, in microseconds; it never goes backwards. */
 typedef struct {
-  uint32_t abi;        /* MDEMU_PLUGIN_ABI */
+  uint32_t abi;        /* EMUMD_PLUGIN_ABI */
   const char *name;    /* e.g. "ROTT Accelerator" */
   const char *version; /* e.g. "v0.1.0" */
 
   /* Power the device on (the ST was switched on, or cold-reset): boot the
    * firmware. Returns 0, or non-zero if it could not start (it logs why). */
-  int (*power_on)(const mdemu_host_t *host, uint64_t now_us);
+  int (*power_on)(const emumd_host_t *host, uint64_t now_us);
   /* Power it off (cold reset or emulator exit). Flash contents survive. */
   void (*power_off)(void);
 
@@ -60,11 +60,11 @@ typedef struct {
   /* Called once per ST frame (VBL), so the firmware's main loop also runs
    * while the ST leaves the cartridge alone. */
   void (*tick)(uint64_t now_us);
-} mdemu_plugin_t;
+} emumd_plugin_t;
 
-typedef const mdemu_plugin_t *(*mdemu_plugin_entry_t)(void);
+typedef const emumd_plugin_t *(*emumd_plugin_entry_t)(void);
 
-/* What a plugin defines (md-emulator's runtime does it for you). */
-const mdemu_plugin_t *mdemu_plugin_v1(void);
+/* What a plugin defines (EmuMD's runtime does it for you). */
+const emumd_plugin_t *emumd_plugin_v1(void);
 
-#endif /* MDEMU_PLUGIN_H */
+#endif /* EMUMD_PLUGIN_H */

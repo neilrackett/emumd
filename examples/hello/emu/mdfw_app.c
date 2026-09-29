@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * File: mdfw_app.c
- * Description: The hello firmware for md-emulator: what its main() does
+ * Description: The hello firmware for EmuMD: what its main() does
  *              after setting up hardware, and one pass of its main loop.
  */
 #include "cart_image.h"

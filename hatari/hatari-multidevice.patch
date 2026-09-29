@@ -1,8 +1,8 @@
-SidecarTridge Multi-device support for Hatari 2.6.1 (md-emulator).
+SidecarTridge Multi-device support for Hatari 2.6.1 (EmuMD).
 Options --md-firmware/--md-sd/--md-option/--md-verbose, a [MultiDevice]
 config section, a .mdfw as the last argument, and the cartridge bank
 that routes ROM3/ROM4 to the firmware. build-hatari.sh applies it and
-adds multidevice.c, multidevice.h and mdemu_plugin.h.
+adds multidevice.c, multidevice.h and emumd_plugin.h.
 
 diff -ruN a/src/configuration.c b/src/configuration.c
 --- a/src/configuration.c
@@ -188,7 +188,7 @@ diff -ruN a/src/includes/configuration.h b/src/includes/configuration.h
  } CNF_ROM;
  
  
-+/* SidecarTridge Multi-device configuration (firmware built with md-emulator) */
++/* SidecarTridge Multi-device configuration (firmware built with EmuMD) */
 +typedef struct
 +{
 +  bool bEnabled;

@@ -5,7 +5,7 @@
  * or at your option any later version. Read the file gpl.txt for details.
  *
  * SidecarTridge Multi-device on the cartridge port, running a firmware
- * built for the host with md-emulator (a .mdfw plugin).
+ * built for the host with EmuMD (a .mdfw plugin).
  * Copyright (C) 2026 Neil Rackett
  */
 

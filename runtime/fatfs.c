@@ -414,7 +414,7 @@ FRESULT f_getfree(const TCHAR *path, DWORD *nclst, FATFS **fatfs) {
 
 FRESULT f_getlabel(const TCHAR *path, TCHAR *label, DWORD *vsn) {
   (void)path;
-  if (label) strcpy(label, "MDEMU");
+  if (label) strcpy(label, "EMUMD");
   if (vsn) *vsn = 0x4d44454du;
   return FR_OK;
 }

@@ -74,7 +74,7 @@ print:					; print(string on the stack)
 	jmp (a0)
 
 title:
-	dc.b $d,$a,"md-emulator hello example",$d,$a,0
+	dc.b $d,$a,"EmuMD hello example",$d,$a,0
 no_answer:
 	dc.b "No answer from the firmware.",$d,$a,0
 	even

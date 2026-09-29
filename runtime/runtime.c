@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * File: runtime.c
- * Description: The plugin side of md-emulator: the mdemu_plugin_v1 entry
- *              point (mdemu_plugin.h) wrapped around a firmware's
+ * Description: The plugin side of EmuMD: the emumd_plugin_v1 entry
+ *              point (emumd_plugin.h) wrapped around a firmware's
  *              mdfw_app (mdfw.h). Holds the ROM4 window and the ROM3
  *              capture ring, and runs the firmware's main loop whenever
  *              the ST touches the cartridge or a frame passes.
@@ -13,7 +13,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 
-#include "mdemu_plugin.h"
+#include "emumd_plugin.h"
 #include "mdfw.h"
 #include "pico.h"
 #include "runtime.h"
@@ -22,7 +22,7 @@
 /* State                                                                */
 /* ------------------------------------------------------------------ */
 
-static const mdemu_host_t *s_host;
+static const emumd_host_t *s_host;
 static bool s_on;
 
 static uint16_t s_rom4[MDFW_ROM4_WORDS] __attribute__((aligned(8)));
@@ -219,8 +219,8 @@ static void run_main_loop(void) {
 /* The plugin interface                                                 */
 /* ------------------------------------------------------------------ */
 
-static int plugin_power_on(const mdemu_host_t *host, uint64_t now_us) {
-  if (!host || host->abi != MDEMU_PLUGIN_ABI) return -1;
+static int plugin_power_on(const emumd_host_t *host, uint64_t now_us) {
+  if (!host || host->abi != EMUMD_PLUGIN_ABI) return -1;
   s_host = host;
   snprintf(s_options, sizeof(s_options), "%s", host->options ? host->options : "");
   snprintf(s_sd_root, sizeof(s_sd_root), "%s", host->sd_dir ? host->sd_dir : ".");
@@ -289,16 +289,16 @@ void mdfw_runtime_reboot(void) {
 }
 
 static void reboot_now(void) {
-  const mdemu_host_t *host = s_host;
+  const emumd_host_t *host = s_host;
   s_reboot_pending = false;
   plugin_power_off();
   plugin_power_on(host, s_host_us);
 }
 
-__attribute__((visibility("default"))) const mdemu_plugin_t *mdemu_plugin_v1(
+__attribute__((visibility("default"))) const emumd_plugin_t *emumd_plugin_v1(
     void) {
-  static mdemu_plugin_t plugin = {
-      .abi = MDEMU_PLUGIN_ABI,
+  static emumd_plugin_t plugin = {
+      .abi = EMUMD_PLUGIN_ABI,
       .power_on = plugin_power_on,
       .power_off = plugin_power_off,
       .rom4_read = plugin_rom4_read,

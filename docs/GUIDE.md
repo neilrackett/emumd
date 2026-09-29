@@ -1,4 +1,4 @@
-# MD Emulator developer guide
+# EmuMD developer guide
 
 How to build SidecarTridge Multi-device firmware as a `.mdfw`, run it in
 Hatari and test it, and how it all works. For an overview, see the
@@ -7,7 +7,7 @@ Hatari and test it, and how it all works. For an overview, see the
 ## What it is, and is not
 
 A `.mdfw` is your firmware's logic compiled for your computer, not your
-`.uf2`. md-emulator replaces the RP2040 underneath it: the Pico SDK calls,
+`.uf2`. EmuMD replaces the RP2040 underneath it: the Pico SDK calls,
 flash, FatFs, the second core, and the PIO and DMA plumbing that serves the
 cartridge bus. So:
 
@@ -29,7 +29,7 @@ You need a C compiler, CMake, Python 3 and git; for the ST side of the
 example, a TOS image.
 
 ```sh
-make hatari      # Hatari 2.6.1 + Multi-device support, in ~/.cache/md-emulator
+make hatari      # Hatari 2.6.1 + Multi-device support, in ~/.cache/emumd
 make             # the example firmware -> examples/hello/build/hello.mdfw
 make test        # the runtime's self-test
 
@@ -42,20 +42,20 @@ firmware wrote into ROM4, "pings" the firmware with a ROM3 read and prints
 its answer:
 
 ```
-md-emulator hello example
+EmuMD hello example
 Hello from the Multi-device (emulated)!
 Pong 1 from the RP2040's side.
 ```
 
-## Using md-emulator in your project
+## Using EmuMD in your project
 
-Add md-emulator to your firmware's repository as a submodule, next to the
+Add EmuMD to your firmware's repository as a submodule, next to the
 glue file:
 
 ```sh
-git submodule add https://github.com/neilrackett/md-emulator.git emu/md-emulator
-emu/md-emulator/tools/mdfw init      # mdfw.ini and emu/mdfw_app.c
-emu/md-emulator/tools/mdfw skill install   # optional, for coding agents
+git submodule add https://github.com/neilrackett/emumd.git emu/emumd
+emu/emumd/tools/mdfw init      # mdfw.ini and emu/mdfw_app.c
+emu/emumd/tools/mdfw skill install   # optional, for coding agents
 ```
 
 ```
@@ -64,17 +64,17 @@ my-firmware/
   emu/
     mdfw_app.c          the glue (committed)
     shim/               your stand-in headers, if any (committed)
-    md-emulator/        this repository, pinned (submodule)
+    emumd/              this repository, pinned (submodule)
   build/                build output (ignore it)
 ```
 
-The submodule pins the md-emulator your firmware was tested with, so a
+The submodule pins the EmuMD your firmware was tested with, so a
 clone (or CI, with `git submodule update --init`) builds the same `.mdfw`,
-and the agent skill matches it. md-emulator never writes inside its own
+and the agent skill matches it. EmuMD never writes inside its own
 folder when building your firmware: objects and the `.mdfw` go to your
 `build/`, and the patched Hatari is built once per user in
-`~/.cache/md-emulator` (or `$MDEMU_CACHE`) and shared by every project.
-If a project updates its submodule to an md-emulator whose Hatari patch
+`~/.cache/emumd` (or `$EMUMD_CACHE`) and shared by every project.
+If a project updates its submodule to an EmuMD version whose Hatari patch
 changed, `mdfw run` says so; `mdfw hatari` rebuilds it.
 
 Any other checkout works too: put its `tools/` on your `PATH`, or link
@@ -84,8 +84,8 @@ A CI job, for example:
 
 ```sh
 git submodule update --init
-emu/md-emulator/tools/mdfw hatari
-emu/md-emulator/tools/mdfw run --headless --frames 600 --no-user-config \
+emu/emumd/tools/mdfw hatari
+emu/emumd/tools/mdfw run --headless --frames 600 --no-user-config \
     --tos "$TOS_IMAGE" --screenshot boot.png --log boot.log
 grep -q "my firmware is ready" boot.log
 ```
@@ -101,9 +101,9 @@ grep -q "my firmware is ready" boot.log
 | `mdfw info FILE.mdfw` | Shows a `.mdfw`'s name, version and interface |
 | `mdfw cart IMAGE -o cart.h` | Turns a raw cartridge image into a C array of ST words for `mdfw_rom4_load()` |
 | `mdfw hatari` | Builds the patched Hatari (same as `make hatari`) |
-| `mdfw skill install [--user]` | Gives coding agents the md-emulator skill (see [Coding agents](#coding-agents)) |
+| `mdfw skill install [--user]` | Gives coding agents the EmuMD skill (see [Coding agents](#coding-agents)) |
 
-`mdfw run` uses `$MDEMU_HATARI`, or `hatari` in `mdfw.ini`'s `[run]`
+`mdfw run` uses `$EMUMD_HATARI`, or `hatari` in `mdfw.ini`'s `[run]`
 section, or the Hatari that `mdfw hatari` built. It turns Hatari's GEMDOS
 drive off unless you ask for one (`--harddrive DIR`), so your firmware's
 cartridge boots; see [Hatari](#hatari) for why.
@@ -140,7 +140,7 @@ exclude =                     ; taken out of the files above
 [compile]
 shims =                       ; your stand-in headers, searched first
     emu/shim
-include =                     ; your include folders, searched after md-emulator's
+include =                     ; your include folders, searched after EmuMD's
     rp/src/include
 defines =                     ; one per line: NAME or NAME=VALUE
     RELEASE_VERSION=MDFW_VERSION
@@ -156,7 +156,7 @@ options =                     ; --md-option key=value, one per line
 hatari_args = --memsize 4
 ```
 
-Headers are found in this order: your `shims`, md-emulator's stand-ins
+Headers are found in this order: your `shims`, EmuMD's stand-ins
 (`runtime/shim`: the Pico SDK, FatFs, the templates' `debug.h`), `mdfw.h`,
 then your `include` folders. So your hardware versions of those headers
 are skipped without you having to move them.
@@ -165,7 +165,7 @@ are skipped without you having to move them.
 
 A SidecarTridge firmware's `main()` sets up the hardware (clocks, PIO,
 DMA, the SD card), copies its cartridge image into ROM4, then loops. For
-md-emulator you keep the loop's work and leave the hardware out:
+EmuMD you keep the loop's work and leave the hardware out:
 
 1. `mdfw init` in your repository.
 2. List the sources that hold your firmware's logic in `mdfw.ini`, and
@@ -197,11 +197,11 @@ const mdfw_app_t mdfw_app = {
 ```
 
 4. `mdfw build`. If linking fails with undefined symbols, the firmware
-   calls something md-emulator does not stand in for: leave out the source
+   calls something EmuMD does not stand in for: leave out the source
    that calls it, or define the function in your glue file.
 
 Firmware built on the SidecarTridge template reads ROM3 through
-`commemul.h`; md-emulator provides `commemul_init()` and `commemul_poll()`
+`commemul.h`; EmuMD provides `commemul_init()` and `commemul_poll()`
 (and the `commemul_set_irq_handler()` hook), so that code works unchanged.
 Anything else can use `mdfw_rom3_set_irq()` and `mdfw_rom3_pop()`.
 
@@ -220,7 +220,7 @@ emulated time (`mdfw_time_us`).
 
 What stands in for what:
 
-| On the RP2040 | In md-emulator |
+| On the RP2040 | In EmuMD |
 | --- | --- |
 | ROM4 (ROM_IN_RAM, served by PIO + DMA) | A 64 KB array; word *i* is what the ST reads at $FA0000 + 2*i* |
 | ROM3 capture (PIO + DMA ring + IRQ) | A 4096-sample ring; your handler is called on every ROM3 read |
@@ -240,7 +240,7 @@ it) and once per frame. Core 1, if started, runs alongside.
 
 `hatari/` holds a patch for Hatari 2.6.1 and the files it adds;
 `hatari/build-hatari.sh` (or `make hatari`, or `mdfw hatari`) clones Hatari
-into `~/.cache/md-emulator/hatari`, applies it and builds. New options,
+into `~/.cache/emumd/hatari`, applies it and builds. New options,
 also kept in a `[MultiDevice]` section of `hatari.cfg`:
 
 | Option | |
@@ -266,8 +266,8 @@ cartridge port); a warm reset leaves it running.
 
 ## Coding agents
 
-`skills/md-emulator/SKILL.md` is an [Agent Skill](https://agentskills.io):
-how to port a firmware to md-emulator, fix build errors, and run and check
+`skills/emumd/SKILL.md` is an [Agent Skill](https://agentskills.io):
+how to port a firmware to EmuMD, fix build errors, and run and check
 it headlessly. `mdfw skill install` links it into your project's
 `.claude/skills/` (relative to the submodule, so every clone has it, at
 the matching version); `--user` puts it in `~/.claude/skills/` for all your
@@ -277,5 +277,5 @@ from there; other agents that read skills can be pointed at the same folder.
 ## Licence
 
 GPL-3.0-or-later ([LICENSE](../LICENSE)), except the files that go into Hatari
-(`hatari/`, and `include/mdemu_plugin.h`, which both sides share), which
+(`hatari/`, and `include/emumd_plugin.h`, which both sides share), which
 are GPL-2.0-or-later like Hatari ([hatari/COPYING](../hatari/COPYING)).

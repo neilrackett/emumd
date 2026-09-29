@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * File: mdfw.h
- * Description: The firmware side of md-emulator. A Multi-device firmware
+ * Description: The firmware side of EmuMD. A Multi-device firmware
  *              built as a .mdfw plugin is its own portable C sources, a
  *              small glue file that defines `mdfw_app` below, and the
- *              md-emulator runtime, which stands in for the RP2040 (Pico
+ *              EmuMD runtime, which stands in for the RP2040 (Pico
  *              SDK, flash, FatFs, the cartridge bus). `mdfw build` puts
  *              them together; see docs/GUIDE.md.
  */

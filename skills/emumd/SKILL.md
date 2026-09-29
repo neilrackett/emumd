@@ -1,31 +1,31 @@
 ---
-name: md-emulator
-description: Build and run SidecarTridge Multi-device (RP2040) firmware in Hatari with md-emulator. Use when porting a Multi-device firmware to md-emulator, writing or fixing its mdfw.ini or emu/mdfw_app.c, fixing mdfw build or link errors, or running a firmware (and the Atari ST software that talks to it) headlessly to check what the ST shows.
+name: emumd
+description: Build and run SidecarTridge Multi-device (RP2040) firmware in Hatari with EmuMD. Use when porting a Multi-device firmware to EmuMD, writing or fixing its mdfw.ini or emu/mdfw_app.c, fixing mdfw build or link errors, or running a firmware (and the Atari ST software that talks to it) headlessly to check what the ST shows.
 ---
 
-# md-emulator
+# EmuMD
 
-md-emulator builds a Multi-device firmware's own C sources for the host as a
+EmuMD builds a Multi-device firmware's own C sources for the host as a
 `.mdfw` (a shared library) and runs it in a patched Hatari, on the emulated
 cartridge port. The firmware's hardware set-up (PIO, DMA, clocks, SD driver,
-Wi-Fi) is left out; md-emulator's runtime stands in for the Pico SDK, flash,
+Wi-Fi) is left out; EmuMD's runtime stands in for the Pico SDK, flash,
 FatFs, core 1 and the ROM3/ROM4 bus. It is not RP2040 emulation: the `.uf2`
 is not used.
 
 ## Find the tool
 
-In order: `emu/md-emulator/tools/mdfw` (the usual submodule), `mdfw` on
-`PATH`, or `<md-emulator>/tools/mdfw` — this skill's folder is
-`<md-emulator>/skills/md-emulator` (resolve symlinks with `pwd -P`). Below,
-`mdfw` means that script. Reference: `<md-emulator>/docs/GUIDE.md`, the API in
-`<md-emulator>/include/mdfw.h`, a minimal firmware in
-`<md-emulator>/examples/hello`.
+In order: `emu/emumd/tools/mdfw` (the usual submodule), `mdfw` on
+`PATH`, or `<emumd>/tools/mdfw` — this skill's folder is
+`<emumd>/skills/emumd` (resolve symlinks with `pwd -P`). Below,
+`mdfw` means that script. Reference: `<emumd>/docs/GUIDE.md`, the API in
+`<emumd>/include/mdfw.h`, a minimal firmware in
+`<emumd>/examples/hello`.
 
-If the project has no md-emulator yet, add it as a submodule (pins the
+If the project has no EmuMD yet, add it as a submodule (pins the
 version the firmware was tested with):
 
 ```sh
-git submodule add https://github.com/neilrackett/md-emulator.git emu/md-emulator
+git submodule add https://github.com/neilrackett/emumd.git emu/emumd
 ```
 
 ## Porting a firmware
@@ -38,7 +38,7 @@ git submodule add https://github.com/neilrackett/md-emulator.git emu/md-emulator
    `main.c`, `romemul.c`, `commemul.c`, `sdcard.c`, `hw_config.c`,
    `select.c`, `reset.c`, network, display, USB and settings code unless the
    logic needs them.
-3. `[compile] include`: the firmware's include folders. md-emulator's
+3. `[compile] include`: the firmware's include folders. EmuMD's
    stand-ins (Pico SDK headers, `ff.h`, `debug.h`) are searched before them,
    so hardware versions of those headers are skipped automatically.
 4. Write `emu/mdfw_app.c`: `init` does what `main()` does after the
@@ -70,7 +70,7 @@ Defines go in `[compile] defines`, one per line (`RELEASE_VERSION=MDFW_VERSION`)
 ## Running and checking
 
 ```sh
-mdfw hatari        # once: builds the patched Hatari into ~/.cache/md-emulator
+mdfw hatari        # once: builds the patched Hatari into ~/.cache/emumd
 mdfw run --headless --frames 400 --no-user-config --tos TOS.IMG \
          --sd sd --screenshot out.png --log run.log --timeout 300
 ```
@@ -92,5 +92,5 @@ options with `-O key=value`, and raw Hatari options after `--`.
 - The ST's text screen is 40 columns in low resolution.
 - The emulated Multi-device is infinitely fast: do not draw conclusions
   about speed or timeouts; that needs real hardware.
-- If mdfw warns that Hatari was built from a different md-emulator, run
+- If mdfw warns that Hatari was built from a different version of EmuMD, run
   `mdfw hatari`.

@@ -1,10 +1,10 @@
-# md-emulator: SidecarTridge Multi-device firmware on the host, for Hatari.
+# EmuMD: SidecarTridge Multi-device emulation tools.
 # Copyright (C) 2026 Neil Rackett
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 #   make           build the example firmware (examples/hello)
 #   make test      the runtime's self-test
-#   make hatari    Hatari 2.6.1 with Multi-device support (~/.cache/md-emulator)
+#   make hatari    Hatari 2.6.1 with Multi-device support (~/.cache/emumd)
 #   make clean
 
 MDFW := tools/mdfw

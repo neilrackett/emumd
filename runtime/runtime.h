@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * File: runtime.h
- * Description: Internal calls between the md-emulator runtime's parts.
+ * Description: Internal calls between the EmuMD runtime's parts.
  */
 #ifndef MDFW_RUNTIME_H
 #define MDFW_RUNTIME_H
