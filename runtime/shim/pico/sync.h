@@ -1,11 +1,15 @@
 /* Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: GPL-3.0-or-later */
-/* Host stand-in for pico/sync.h: critical sections and mutexes are host
- * mutexes (they matter once core 1 runs as a thread). */
+/* Host stand-in for pico/sync.h: critical sections, mutexes and
+ * semaphores are host ones (they matter once the firmware has threads). */
 #ifndef MDFW_SHIM_PICO_SYNC_H
 #define MDFW_SHIM_PICO_SYNC_H
 #include "pico.h"
 #include "hardware/sync.h"
+#include "pico/sem.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
 typedef struct {
   void *impl;
 } critical_section_t;
@@ -25,4 +29,7 @@ typedef mutex_t recursive_mutex_t;
 #define recursive_mutex_init mutex_init
 #define recursive_mutex_enter_blocking mutex_enter_blocking
 #define recursive_mutex_exit mutex_exit
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -81,6 +81,7 @@ class Project:
         self.includes = [self.path(p) for p in self.lines("compile", "include")]
         self.defines = self.lines("compile", "defines")
         self.cflags = shlex.split(self.get("compile", "cflags") or "-O2")
+        self.cxxflags = shlex.split(self.get("compile", "cxxflags"))
         self.ldflags = shlex.split(self.get("compile", "ldflags") or "")
 
     def get(self, section, key):
@@ -106,12 +107,25 @@ class Project:
 # Building
 # ---------------------------------------------------------------------------
 
-def compiler():
+CXX_EXTENSIONS = (".cpp", ".cc", ".cxx")
+
+
+def is_cxx(src):
+    return src.endswith(CXX_EXTENSIONS)
+
+
+def compiler(cxx=False):
+    if cxx:
+        return shlex.split(os.environ.get("CXX", "c++"))
     return shlex.split(os.environ.get("CC", "cc"))
 
 
 def compile_flags(proj):
-    flags = ["-std=gnu11", "-fPIC", "-fvisibility=hidden", "-g", "-Wall",
+    """Flags for both languages; std_flags() adds the language standard."""
+    # -fshort-enums: enums take the RP2040's sizes (arm-none-eabi's), so the
+    # structures a firmware keeps in flash or shared memory are laid out
+    # the same.
+    flags = ["-fPIC", "-fvisibility=hidden", "-fshort-enums", "-g", "-Wall",
              "-Wno-unused-function", "-Wno-missing-braces"] + proj.cflags
     # Your shims, then the runtime's (they replace the Pico SDK, FatFs and
     # the templates' debug.h, even where your include folders have their
@@ -122,10 +136,18 @@ def compile_flags(proj):
     flags.append('-DMDFW_NAME="%s"' % proj.name.replace('"', '\\"'))
     if proj.version:
         flags.append('-DMDFW_VERSION="%s"' % proj.version.replace('"', '\\"'))
-    flags.append("-DEMUMD=1")
+    # As the Pico SDK's host platform has them: built with the SDK, not
+    # for the RP2040 itself.
+    flags += ["-DEMUMD=1", "-DPICO_BUILD=1", "-DPICO_ON_DEVICE=0"]
     for d in proj.defines:
         flags.append("-D" + d)
     return flags
+
+
+def std_flags(proj, src):
+    if is_cxx(src):
+        return ["-std=gnu++17"] + proj.cxxflags
+    return ["-std=gnu11"]
 
 
 def object_for(proj, src):
@@ -165,7 +187,8 @@ def build(proj, verbose=False, jobs=None, clean=False):
 
     # Rebuild everything when the flags change.
     stamp = os.path.join(proj.build_dir, "flags")
-    digest = hashlib.sha1(" ".join(compiler() + flags).encode()).hexdigest()
+    digest = hashlib.sha1(" ".join(compiler() + compiler(True) + flags + proj.cxxflags)
+                          .encode()).hexdigest()
     old = open(stamp).read() if os.path.exists(stamp) else ""
     force = clean or old != digest
 
@@ -178,7 +201,8 @@ def build(proj, verbose=False, jobs=None, clean=False):
     def cc(item):
         src, obj = item
         os.makedirs(os.path.dirname(obj), exist_ok=True)
-        cmd = compiler() + flags + ["-MMD", "-MP", "-c", src, "-o", obj]
+        cmd = (compiler(is_cxx(src)) + std_flags(proj, src) + flags
+               + ["-MMD", "-MP", "-c", src, "-o", obj])
         r = subprocess.run(cmd, capture_output=True, text=True)
         return src, cmd, r
 
@@ -205,7 +229,9 @@ def build(proj, verbose=False, jobs=None, clean=False):
         return proj.output
 
     os.makedirs(os.path.dirname(proj.output), exist_ok=True)
-    link = compiler() + ["-shared", "-o", proj.output] + objs + proj.ldflags + ["-lpthread"]
+    # The C++ driver links in its runtime library when there is C++.
+    link = (compiler(any(is_cxx(s) for s in srcs))
+            + ["-shared", "-o", proj.output] + objs + proj.ldflags + ["-lpthread"])
     if platform.system() == "Linux":
         # Keep the firmware's symbols to itself, and report missing ones now.
         link += ["-Wl,-Bsymbolic", "-Wl,-z,defs"]
@@ -276,6 +302,7 @@ include =
 defines =
 ;   RELEASE_VERSION="emu"
 cflags = -O2
+; cxxflags =           ; C++ only (.cpp and .cc sources)
 
 [run]
 ; Defaults for mdfw run.
@@ -318,6 +345,8 @@ const mdfw_app_t mdfw_app = {
 #endif
     .init = app_init,
     .poll = app_poll,
+    /* Or, for a main loop that never returns: .main = app_main (see
+     * EmuMD's docs/GUIDE.md) */
 };
 """
 
@@ -473,7 +502,10 @@ def cmd_run(args):
     if args.screenshot or args.no_user_config:
         tmp = tempfile.mkdtemp(prefix="mdfw-run-")
     if args.screenshot:
-        cmd += ["--avirecord", "--avi-vcodec", "png",
+        # Every frame is recorded to keep the last, so compress them
+        # lightly: at Hatari's default level, a busy picture slows a run
+        # tenfold.
+        cmd += ["--avirecord", "--avi-vcodec", "png", "--png-level", "1",
                 "--avi-file", os.path.join(tmp, "screen.avi")]
     if args.no_user_config:
         env["HOME"] = tmp  # Hatari's own config lives under $HOME
@@ -488,11 +520,17 @@ def cmd_run(args):
         os.execve(cmd[0], cmd, env)
 
     # Run it to the end (or the time limit), keeping what it says.
-    log = open(args.log, "w") if args.log else None
+    log = open(args.log, "w", buffering=1) if args.log else None  # line by line
     proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, errors="replace")
     import threading
-    timer = threading.Timer(args.timeout, proc.kill) if args.timeout else None
+    timed_out = threading.Event()
+
+    def time_out():
+        timed_out.set()
+        proc.kill()
+
+    timer = threading.Timer(args.timeout, time_out) if args.timeout else None
     if timer:
         timer.start()
     for line in proc.stdout:
@@ -512,6 +550,11 @@ def cmd_run(args):
             rc = rc or 1
     if tmp:
         shutil.rmtree(tmp, ignore_errors=True)
+    if rc < 0 and not timed_out.is_set():
+        # Killed by a signal: a crash (the firmware's own, often), or the
+        # abort() of a failed assertion or panic.
+        sys.stderr.write("mdfw: Hatari was stopped by signal %d\n" % -rc)
+        sys.exit(128 - rc)
     sys.exit(rc if rc and rc > 0 else 0)
 
 

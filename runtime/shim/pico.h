@@ -40,6 +40,9 @@ typedef unsigned int uint;
 #ifndef __force_inline
 #define __force_inline inline __attribute__((always_inline))
 #endif
+#ifndef __noinline
+#define __noinline __attribute__((noinline))
+#endif
 #ifndef __unused
 #define __unused __attribute__((unused))
 #endif
@@ -77,6 +80,11 @@ void mdfw_wfi(void);
 #define __wfe() mdfw_wfe()
 #define __wfi() mdfw_wfi()
 static inline void __breakpoint(void) { abort(); }
+/* The SDK's multiply helpers: a 32-bit product, wrapping. */
+static inline int32_t __mul_instruction(int32_t a, int32_t b) {
+  return (int32_t)((uint32_t)a * (uint32_t)b);
+}
+#define __fast_mul(a, b) __mul_instruction((a), (b))
 
 /* Interrupts: ROM3 "interrupts" run synchronously on the emulator's thread,
  * so masking them has nothing to do. */
@@ -88,6 +96,9 @@ typedef void (*irq_handler_t)(void);
 uint get_core_num(void);
 
 void panic(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
+__attribute__((noreturn)) static inline void panic_unsupported(void) {
+  panic("not supported");
+}
 #define hard_assert(c) \
   do {                 \
     if (!(c)) panic("assertion failed: %s", #c); \

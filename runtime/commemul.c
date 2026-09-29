@@ -16,9 +16,16 @@ typedef void (*CommEmulSampleCallback)(uint16_t sample);
 
 int commemul_init(void) { return 0; }
 
+/* An empty ring is usually a firmware waiting for the ST: let the other
+ * threads run, and a firmware thread be stopped. */
 void commemul_poll(CommEmulSampleCallback callback) {
   uint16_t sample;
-  while (mdfw_rom3_pop(&sample)) callback(sample);
+  bool any = false;
+  while (mdfw_rom3_pop(&sample)) {
+    callback(sample);
+    any = true;
+  }
+  if (!any) tight_loop_contents();
 }
 
 void commemul_set_irq_handler(irq_handler_t handler) { mdfw_rom3_set_irq(handler); }

@@ -5,8 +5,9 @@
  * File: multicore.c
  * Description: The RP2040's second core as a host thread: launching it,
  *              the two 8-deep inter-core FIFOs, the 32 spin locks,
- *              critical sections, mutexes and SEV/WFE. Core 0 is the
- *              emulator's own thread.
+ *              critical sections, mutexes, semaphores and SEV/WFE.
+ *              Core 0 is the emulator's own thread, or the firmware's
+ *              main thread (mdfw_app.main).
  */
 
 #include <errno.h>
@@ -17,6 +18,7 @@
 #include "hardware/sync.h"
 #include "pico.h"
 #include "pico/multicore.h"
+#include "pico/sem.h"
 #include "pico/sync.h"
 #include "runtime.h"
 
@@ -31,6 +33,10 @@ static pthread_mutex_t s_event_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_event = PTHREAD_COND_INITIALIZER;
 static unsigned s_event_seq;
 
+/* A thread stopped in a condition wait gets the mutex back before it
+ * goes, and must not keep it. */
+static void unlock_mutex(void *m) { pthread_mutex_unlock((pthread_mutex_t *)m); }
+
 static void wait_event_ms(unsigned ms) {
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
@@ -38,11 +44,12 @@ static void wait_event_ms(unsigned ms) {
   ts.tv_sec += ts.tv_nsec / 1000000000L;
   ts.tv_nsec %= 1000000000L;
   pthread_mutex_lock(&s_event_lock);
+  pthread_cleanup_push(unlock_mutex, &s_event_lock);
   const unsigned seq = s_event_seq;
   while (seq == s_event_seq) {
     if (pthread_cond_timedwait(&s_event, &s_event_lock, &ts) == ETIMEDOUT) break;
   }
-  pthread_mutex_unlock(&s_event_lock);
+  pthread_cleanup_pop(1);
 }
 
 void mdfw_sev(void) {
@@ -80,21 +87,25 @@ static bool fifo_push(fifo_t *f, uint32_t v, int64_t timeout_us) {
     ts.tv_sec += (time_t)(timeout_us / 1000000) + ts.tv_nsec / 1000000000L;
     ts.tv_nsec %= 1000000000L;
   }
+  bool ok = true;
   pthread_mutex_lock(&f->lock);
+  pthread_cleanup_push(unlock_mutex, &f->lock);
   while (f->count == FIFO_DEPTH) {
     if (timeout_us < 0) {
       pthread_cond_wait(&f->changed, &f->lock);
     } else if (pthread_cond_timedwait(&f->changed, &f->lock, &ts) == ETIMEDOUT) {
-      pthread_mutex_unlock(&f->lock);
-      return false;
+      ok = false;
+      break;
     }
   }
-  f->buf[(f->head + f->count) % FIFO_DEPTH] = v;
-  f->count++;
-  pthread_cond_broadcast(&f->changed);
-  pthread_mutex_unlock(&f->lock);
-  __sev();
-  return true;
+  if (ok) {
+    f->buf[(f->head + f->count) % FIFO_DEPTH] = v;
+    f->count++;
+    pthread_cond_broadcast(&f->changed);
+  }
+  pthread_cleanup_pop(1);
+  if (ok) __sev();
+  return ok;
 }
 
 static bool fifo_pop(fifo_t *f, uint32_t *v, int64_t timeout_us) {
@@ -105,21 +116,25 @@ static bool fifo_pop(fifo_t *f, uint32_t *v, int64_t timeout_us) {
     ts.tv_sec += (time_t)(timeout_us / 1000000) + ts.tv_nsec / 1000000000L;
     ts.tv_nsec %= 1000000000L;
   }
+  bool ok = true;
   pthread_mutex_lock(&f->lock);
+  pthread_cleanup_push(unlock_mutex, &f->lock);
   while (f->count == 0) {
     if (timeout_us < 0) {
       pthread_cond_wait(&f->changed, &f->lock);
     } else if (pthread_cond_timedwait(&f->changed, &f->lock, &ts) == ETIMEDOUT) {
-      pthread_mutex_unlock(&f->lock);
-      return false;
+      ok = false;
+      break;
     }
   }
-  *v = f->buf[f->head];
-  f->head = (f->head + 1) % FIFO_DEPTH;
-  f->count--;
-  pthread_cond_broadcast(&f->changed);
-  pthread_mutex_unlock(&f->lock);
-  return true;
+  if (ok) {
+    *v = f->buf[f->head];
+    f->head = (f->head + 1) % FIFO_DEPTH;
+    f->count--;
+    pthread_cond_broadcast(&f->changed);
+  }
+  pthread_cleanup_pop(1);
+  return ok;
 }
 
 static fifo_t *fifo_out(void) { return &s_fifo[s_core]; }
@@ -171,6 +186,7 @@ static bool s_core1_running;
 static void *core1_main(void *arg) {
   void (*entry)(void) = (void (*)(void))arg;
   s_core = 1;
+  mdfw_runtime_enter_thread();
   pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
   entry();
   return NULL;
@@ -196,11 +212,11 @@ void multicore_reset_core1(void) {
 
 void mdfw_runtime_multicore_stop(void) { multicore_reset_core1(); }
 
-/* tight_loop_contents(): let the other thread run, and let core 1 be
- * stopped. */
+/* tight_loop_contents(): let the other threads run, and let the
+ * firmware's own threads be stopped. */
 void mdfw_tight_loop(void) {
   static __thread unsigned n;
-  if (s_core) pthread_testcancel();
+  if (mdfw_runtime_own_thread()) pthread_testcancel();
   if ((++n & 63u) == 0) sched_yield();
 }
 
@@ -284,3 +300,88 @@ bool mutex_try_enter(mutex_t *m, uint32_t *owner_out) {
   return pthread_mutex_trylock((pthread_mutex_t *)m->impl) == 0;
 }
 void mutex_exit(mutex_t *m) { pthread_mutex_unlock((pthread_mutex_t *)m->impl); }
+
+/* ------------------------------------------------------------------ */
+/* Semaphores                                                           */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+  pthread_mutex_t lock;
+  pthread_cond_t changed;
+} sem_impl_t;
+
+void sem_init(semaphore_t *sem, int16_t initial_permits, int16_t max_permits) {
+  sem_impl_t *s = sem->impl;
+  if (!s) {
+    s = malloc(sizeof(*s));
+    pthread_mutex_init(&s->lock, NULL);
+    pthread_cond_init(&s->changed, NULL);
+    sem->impl = s;
+  }
+  pthread_mutex_lock(&s->lock);
+  sem->permits = initial_permits;
+  sem->max_permits = max_permits;
+  pthread_mutex_unlock(&s->lock);
+}
+
+int sem_available(semaphore_t *sem) { return sem->permits; }
+
+bool sem_release(semaphore_t *sem) {
+  sem_impl_t *s = sem->impl;
+  pthread_mutex_lock(&s->lock);
+  const bool rc = sem->permits < sem->max_permits;
+  if (rc) {
+    sem->permits++;
+    pthread_cond_broadcast(&s->changed);
+  }
+  pthread_mutex_unlock(&s->lock);
+  if (rc) __sev();
+  return rc;
+}
+
+void sem_reset(semaphore_t *sem, int16_t permits) {
+  sem_impl_t *s = sem->impl;
+  pthread_mutex_lock(&s->lock);
+  sem->permits = permits;
+  pthread_cond_broadcast(&s->changed);
+  pthread_mutex_unlock(&s->lock);
+}
+
+bool sem_try_acquire(semaphore_t *sem) {
+  sem_impl_t *s = sem->impl;
+  pthread_mutex_lock(&s->lock);
+  const bool rc = sem->permits > 0;
+  if (rc) sem->permits--;
+  pthread_mutex_unlock(&s->lock);
+  return rc;
+}
+
+/* Waits in steps of a millisecond of real time, so an emulated deadline
+ * is noticed. On the emulator's thread nothing else moves emulated time
+ * on, so each step does. */
+bool sem_acquire_block_until(semaphore_t *sem, absolute_time_t until) {
+  sem_impl_t *s = sem->impl;
+  bool rc = true;
+  pthread_mutex_lock(&s->lock);
+  pthread_cleanup_push(unlock_mutex, &s->lock);
+  while (sem->permits <= 0) {
+    if (until != at_the_end_of_time && time_us_64() >= until) {
+      rc = false;
+      break;
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_nsec += 1000000L;
+    ts.tv_sec += ts.tv_nsec / 1000000000L;
+    ts.tv_nsec %= 1000000000L;
+    pthread_cond_timedwait(&s->changed, &s->lock, &ts);
+    if (!mdfw_runtime_own_thread() && until != at_the_end_of_time) {
+      mdfw_runtime_sleep(1000);
+    }
+  }
+  if (rc) sem->permits--;
+  pthread_cleanup_pop(1);
+  return rc;
+}
+
+void sem_acquire_blocking(semaphore_t *sem) { sem_acquire_block_until(sem, at_the_end_of_time); }

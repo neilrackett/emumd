@@ -36,7 +36,9 @@ typedef struct {
   int (*init)(void);
 
   /* One pass of the firmware's main loop. Return true if it did some work;
-   * the runtime then calls it again (until it returns false). */
+   * the runtime then calls it again (until it returns false). Runs on the
+   * emulator's thread, which it has to give back, so a main loop that
+   * blocks (waiting for the ST's VBL, say) goes in `main` instead. */
   bool (*poll)(void);
 
   /* Optional: after every poll that did work (for test hooks, dumps). */
@@ -44,6 +46,15 @@ typedef struct {
 
   /* Optional: power off. */
   void (*shutdown)(void);
+
+  /* Optional, for a firmware whose main() never returns: the rest of
+   * main() after init. It runs as core 0 on a thread of its own,
+   * alongside the emulator, from power-on until power-off, when it is
+   * stopped at its next wait (a sleep, FIFO, tight_loop_contents() or an
+   * empty ROM3 ring). There, sleeping waits for emulated time to pass
+   * rather than moving it on. poll, if also given, still runs on the
+   * emulator's thread. */
+  void (*main)(void);
 } mdfw_app_t;
 
 extern const mdfw_app_t mdfw_app;
@@ -69,6 +80,13 @@ void mdfw_rom4_load(const uint16_t *words, size_t count);
 void mdfw_rom3_set_irq(void (*handler)(void));
 bool mdfw_rom3_pop(uint16_t *sample);
 uint32_t mdfw_rom3_dropped(void); /* samples lost to a full ring */
+
+/* Look at the ring without taking anything from it, for code that
+ * watches for one kind of read while the main loop drains the ring (a
+ * timer callback, say): the next sample after *cursor, a position in the
+ * ring's history that starts at 0 and that this moves on. False if there
+ * is none yet. Samples the ring has already written over are skipped. */
+bool mdfw_rom3_peek(uint32_t *cursor, uint16_t *sample);
 
 /* ------------------------------------------------------------------ */
 /* Storage                                                              */

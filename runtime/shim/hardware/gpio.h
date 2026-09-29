@@ -34,4 +34,11 @@ static inline void gpio_clr_mask(uint32_t m) { (void)m; }
 static inline bool gpio_get(uint g) { (void)g; return true; }
 static inline uint32_t gpio_get_all(void) { return 0xffffffffu; }
 static inline void gpio_set_irq_enabled(uint g, uint32_t e, bool on) { (void)g; (void)e; (void)on; }
+/* The SDK's debug pins, which a firmware may leave in: nothing to toggle. */
+#define CU_REGISTER_DEBUG_PINS(...)
+#define CU_SELECT_DEBUG_PINS(x)
+#define DEBUG_PINS_ENABLED(p) false
+#define DEBUG_PINS_SET(p, v) ((void)0)
+#define DEBUG_PINS_CLR(p, v) ((void)0)
+#define DEBUG_PINS_XOR(p, v) ((void)0)
 #endif

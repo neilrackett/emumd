@@ -43,7 +43,10 @@ git submodule add https://github.com/neilrackett/emumd.git emu/emumd
    so hardware versions of those headers are skipped automatically.
 4. Write `emu/mdfw_app.c`: `init` does what `main()` does after the
    hardware set-up; `poll` is one pass of the main loop, returning true if it
-   did work.
+   did work. If the main loop never returns or blocks (framebuffer-template
+   apps wait for the ST's VBL in `fb_publish`), give the rest of `main()` as
+   `.main` instead: it runs on its own thread as core 0, where sleeps wait
+   for emulated time. Keep `init` to what the ST must see at once (ROM4).
    - Load the cartridge image: `mdfw_rom4_load(target_firmware,
      target_firmware_length)` (the firmware build's `target_firmware.h`; or
      `mdfw cart image.bin -o cart.h`).
@@ -64,8 +67,16 @@ git submodule add https://github.com/neilrackett/emumd.git emu/emumd
 | `Undefined symbols` / `undefined reference` at link | A left-out file defines it: add the file if it is logic, else stub the function in `emu/mdfw_app.c` |
 | Code needs core 1 | `multicore_launch_core1` runs it as a host thread. For determinism a firmware's own "run a job on core 1" helper can run jobs inline in the glue instead |
 | `__not_in_flash_func`, `tight_loop_contents`, `__dmb`... | Already provided by `pico.h`; include it |
+| A stand-in header is ignored: another header in the firmware's folder includes the original in quotes | Give the stand-in the original's include guard and force-include it first: `cflags = -include prefix.h`, the prefix in the shims folder |
+| `cast to smaller integer type`, or flash/config reads wrong after `(uint32_t)&sym - XIP_BASE` | Pointers are 64-bit: do the arithmetic in `uintptr_t`. Pointers passed through the inter-core FIFO need another route (a slot, with the FIFO as the signal) |
+| `uint` undeclared (newlib's `sys/types.h` brings it on the RP2040) | `-include sys/types.h` in the prefix |
+| `section` attribute not valid (macOS) | The SDK's `__scratch_x("name")`-style macros, which the stand-ins empty; a custom one via a shim |
+| Settings or other structures in flash read back wrong | Should not happen: EmuMD builds with `-fshort-enums` like arm-none-eabi. Check for other layout assumptions (`sizeof(void *)`) |
 
 Defines go in `[compile] defines`, one per line (`RELEASE_VERSION=MDFW_VERSION`).
+EmuMD defines `PICO_BUILD=1`, `PICO_ON_DEVICE=0` (the SDK's host platform,
+so upstream host code paths are taken) and `EMUMD=1`. `.cpp`/`.cc` build
+as C++17; `[compile] cxxflags` for C++-only flags.
 
 ## Running and checking
 
@@ -92,5 +103,10 @@ options with `-O key=value`, and raw Hatari options after `--`.
 - The ST's text screen is 40 columns in low resolution.
 - The emulated Multi-device is infinitely fast: do not draw conclusions
   about speed or timeouts; that needs real hardware.
+- To type into the ST: `-- --cmd-fifo FILE`, then write
+  `hatari-event keypress 28` (ST scancodes; `keydown`/`keyup` to hold)
+  to FILE while it runs.
+- A reboot keeps the firmware's variables (the RP2040 would start
+  afresh), so `init` must set up what it relies on.
 - If mdfw warns that Hatari was built from a different version of EmuMD, run
   `mdfw hatari`.

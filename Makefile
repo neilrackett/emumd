@@ -23,9 +23,15 @@ build/runtime_test: runtime/*.c runtime/*.h runtime/shim/*.h runtime/shim/*/*.h 
 	@mkdir -p build
 	$(CC) $(TEST_CFLAGS) runtime/*.c tests/runtime_test.c -lpthread -o $@
 
-test: build/runtime_test
+build/main_test: runtime/*.c runtime/*.h runtime/shim/*.h runtime/shim/*/*.h \
+		include/*.h tests/main_test.c
+	@mkdir -p build
+	$(CC) $(TEST_CFLAGS) runtime/*.c tests/main_test.c -lpthread -o $@
+
+test: build/runtime_test build/main_test
 	rm -rf build/test-sd
 	build/runtime_test build/test-sd
+	build/main_test
 
 hatari:
 	hatari/build-hatari.sh

@@ -5,6 +5,20 @@
 #ifndef MDFW_SHIM_HARDWARE_SYNC_H
 #define MDFW_SHIM_HARDWARE_SYNC_H
 #include "pico.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+/* The Pico SDK's allocation of the 32 locks. */
+#define PICO_SPINLOCK_ID_IRQ 9
+#define PICO_SPINLOCK_ID_TIMER 10
+#define PICO_SPINLOCK_ID_HARDWARE_CLAIM 11
+#define PICO_SPINLOCK_ID_RAND 12
+#define PICO_SPINLOCK_ID_OS1 14
+#define PICO_SPINLOCK_ID_OS2 15
+#define PICO_SPINLOCK_ID_STRIPED_FIRST 16
+#define PICO_SPINLOCK_ID_STRIPED_LAST 23
+#define PICO_SPINLOCK_ID_CLAIM_FREE_FIRST 24
+#define PICO_SPINLOCK_ID_CLAIM_FREE_LAST 31
 typedef volatile uint32_t spin_lock_t;
 spin_lock_t *spin_lock_instance(uint lock_num);
 uint spin_lock_get_num(spin_lock_t *lock);
@@ -17,4 +31,7 @@ void spin_unlock(spin_lock_t *lock, uint32_t saved_irq);
 void spin_lock_unsafe_blocking(spin_lock_t *lock);
 void spin_unlock_unsafe(spin_lock_t *lock);
 static inline uint next_striped_spin_lock_num(void) { return 16; }
+#ifdef __cplusplus
+}
+#endif
 #endif

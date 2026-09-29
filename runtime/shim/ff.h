@@ -12,6 +12,9 @@
 #ifndef MDFW_SHIM_FF_H
 #define MDFW_SHIM_FF_H
 #include "pico.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef unsigned int UINT;
 typedef unsigned char BYTE;
@@ -146,4 +149,7 @@ const char *FRESULT_str(FRESULT i);
 #define f_rewind(fp) f_lseek((fp), 0)
 #define f_rewinddir(dp) f_readdir((dp), 0)
 #define f_rmdir(path) f_unlink(path)
+#ifdef __cplusplus
+}
+#endif
 #endif

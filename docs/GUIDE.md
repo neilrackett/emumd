@@ -121,6 +121,11 @@ For scripts, CI and agents, `mdfw run` can run unattended:
 | `--no-user-config` | Ignore your own Hatari settings (give `--tos` then) |
 | `-O key=value`, `-V` | `--md-option key=value`, `--md-verbose on` |
 
+If Hatari crashes (the firmware's own crash, often, or the `abort()` of a
+failed assertion or `panic()`), `mdfw run` says so and exits non-zero.
+To type into the ST from a script, pass Hatari `-- --cmd-fifo FILE` and
+write `hatari-event keypress 28` (an ST scancode) to the file.
+
 ### mdfw.ini
 
 ```ini
@@ -133,7 +138,7 @@ version = v1.2.3              ; MDFW_VERSION
 [sources]
 files =                       ; paths and globs, relative to this file
     emu/mdfw_app.c
-    rp/src/*.c
+    rp/src/*.c                ; .cpp and .cc are built as C++
 exclude =                     ; taken out of the files above
     rp/src/main.c
     rp/src/romemul.c
@@ -145,7 +150,8 @@ include =                     ; your include folders, searched after EmuMD's
     rp/src/include
 defines =                     ; one per line: NAME or NAME=VALUE
     RELEASE_VERSION=MDFW_VERSION
-cflags = -O2
+cflags = -O2                  ; C and C++
+cxxflags =                    ; C++ only
 ldflags =
 
 [run]                         ; defaults for mdfw run
@@ -160,7 +166,18 @@ hatari_args = --memsize 4
 Headers are found in this order: your `shims`, EmuMD's stand-ins
 (`runtime/shim`: the Pico SDK, FatFs, the templates' `debug.h`), `mdfw.h`,
 then your `include` folders. So your hardware versions of those headers
-are skipped without you having to move them.
+are skipped without you having to move them. One exception: a header
+that includes a neighbour in quotes (`#include "constants.h"`) finds it
+in its own folder before any of these. If your stand-in for such a
+header uses the original's include guard, include it ahead of everything
+(`cflags = -include my_prefix.h`, with the prefix header in `shims`
+including your stand-ins) and the original is then skipped.
+
+Everything is built as the Pico SDK builds for a host: `PICO_BUILD=1`
+and `PICO_ON_DEVICE=0` are defined, as is `EMUMD=1` for anything that
+has to differ, and enums are the RP2040's sizes (`-fshort-enums`), so
+structures kept in flash or shared memory are laid out as on the
+device.
 
 ## Preparing a firmware
 
@@ -201,6 +218,42 @@ const mdfw_app_t mdfw_app = {
    calls something EmuMD does not stand in for: leave out the source
    that calls it, or define the function in your glue file.
 
+Pointers are 64 bits on your computer. Code that keeps an address in a
+32-bit integer (`(uint32_t)&symbol - XIP_BASE`) needs `uintptr_t`
+instead, and pointers cannot travel through the 32-bit inter-core FIFO:
+pass them some other way, with the FIFO saying when.
+
+### A main loop that never returns
+
+Many firmwares, including every app built on the framebuffer template,
+never go back to a main loop: `main()` ends in a loop that blocks,
+waiting for the ST's VBL, say. Such a loop cannot run in `poll`, which
+has to give the emulator its thread back, so give it to EmuMD as `main`
+instead:
+
+```c
+static void app_main(void) {
+  my_emul_start();   /* never returns */
+}
+
+const mdfw_app_t mdfw_app = {
+    .name = MDFW_NAME,
+    .version = MDFW_VERSION,
+    .init = app_init,  /* e.g. load ROM4, so the ST sees the cartridge */
+    .main = app_main,
+};
+```
+
+`main` runs on a thread of its own as core 0, alongside the emulator,
+from power-on until power-off, as the RP2040 runs alongside the ST.
+There, and on core 1, sleeping waits for emulated time to pass rather
+than moving it on, so a firmware thread that waits 20 ms waits while
+the ST runs for 20 ms. At power-off the firmware's threads are stopped
+at their next wait (a sleep, FIFO, semaphore, `tight_loop_contents()` or
+an empty ROM3 ring through `commemul_poll()`), so a loop that spins on a
+flag should call `tight_loop_contents()`. `init` and `poll` (if you give
+one as well) still run on the emulator's thread.
+
 Firmware built on the SidecarTridge template reads ROM3 through
 `commemul.h`; EmuMD provides `commemul_init()` and `commemul_poll()`
 (and the `commemul_set_irq_handler()` hook), so that code works unchanged.
@@ -214,7 +267,8 @@ and [`sidecart/emu/`](https://github.com/neilrackett/atarist-rott/tree/atarist/s
 ## The runtime
 
 `include/mdfw.h` is the whole interface: ROM4 (`mdfw_rom4`,
-`mdfw_rom4_load`), ROM3 (`mdfw_rom3_set_irq`, `mdfw_rom3_pop`), the flash
+`mdfw_rom4_load`), ROM3 (`mdfw_rom3_set_irq`, `mdfw_rom3_pop`,
+`mdfw_rom3_peek`), the flash
 (`mdfw_flash`), the SD card folder, `--md-option` values
 (`mdfw_option`, `mdfw_option_int`), logging (`mdfw_log`, `mdfw_debug`) and
 emulated time (`mdfw_time_us`).
@@ -227,15 +281,22 @@ What stands in for what:
 | ROM3 capture (PIO + DMA ring + IRQ) | A 4096-sample ring; your handler is called on every ROM3 read |
 | Flash, XIP | 2 MB array at `XIP_BASE`; `flash_range_erase/program` keep the real alignment and only clear bits. Survives cold resets; `--md-option flash=FILE` keeps it between runs |
 | microSD + FatFs | FatFs calls on the `--md-sd` folder, ignoring case like FAT |
-| Core 1 | A host thread: `multicore_launch_core1`, the FIFOs both ways, spin locks, critical sections, mutexes, SEV/WFE |
-| Timer, `sleep_ms` & co. | Emulated time from Hatari; sleeping moves it on instead of waiting |
+| Core 1 | A host thread: `multicore_launch_core1`, the FIFOs both ways, spin locks, critical sections, mutexes, semaphores, SEV/WFE |
+| Timer, `sleep_ms` & co. | Emulated time from Hatari. Sleeping on the emulator's thread moves it on; on the firmware's own threads it waits |
+| Alarms, repeating timers, alarm pools | Fired on the emulator's thread in emulated time, as the timer interrupt would; one late is fired once, not caught up |
+| Hardware divider | C division, with the divider's results for division by zero |
 | `DPRINTF` | Hatari's log, with `--md-verbose on` |
-| `watchdog_reboot` | The firmware is powered off and on |
+| `watchdog_reboot` | The firmware is powered off and on; `watchdog_hw->scratch[]` survives that, and is cleared by a cold reset |
 | GPIO, IRQ set-up, clocks, DMA, PIO headers | Accepted and ignored |
 
-The firmware runs on Hatari's thread whenever the ST reads the cartridge,
-every 256th ROM4 read (so a firmware can make progress while the ST polls
-it) and once per frame. Core 1, if started, runs alongside.
+The firmware's `poll` runs on Hatari's thread whenever the ST reads the
+cartridge, every 256th ROM4 read (so a firmware can make progress while
+the ST polls it) and once per frame; timers are checked on every read.
+Its `main` and core 1, if started, run alongside.
+
+A reboot powers the firmware off and on again in the same process, so
+its variables keep their values, where the RP2040 would start with fresh
+RAM: `init` should set up whatever it relies on.
 
 ## Hatari
 

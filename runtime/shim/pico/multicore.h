@@ -5,6 +5,9 @@
 #ifndef MDFW_SHIM_PICO_MULTICORE_H
 #define MDFW_SHIM_PICO_MULTICORE_H
 #include "pico.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
 void multicore_launch_core1(void (*entry)(void));
 void multicore_reset_core1(void);
 bool multicore_fifo_rvalid(void);
@@ -16,4 +19,7 @@ bool multicore_fifo_pop_timeout_us(uint64_t timeout_us, uint32_t *out);
 void multicore_fifo_drain(void);
 static inline void multicore_fifo_clear_irq(void) {}
 static inline uint32_t multicore_fifo_get_status(void) { return 0; }
+#ifdef __cplusplus
+}
+#endif
 #endif
