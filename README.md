@@ -6,7 +6,7 @@ Run your [SidecarTridge Multi-device](https://sidecartridge.com) firmware in [Ha
 
 ## Introduction
 
-Developing for the SidecarTridge Multi-device usually means building a UF2, copying it to the microSD card, rebooting your ST and hoping, every time you change something. EmuMD lets you skip all that and run your firmware in Hatari instead, on your Mac or Linux PC, right alongside the Atari ST software that talks to it.
+Developing for the SidecarTridge Multi-device usually means building a UF2, copying it to the microSD card, rebooting your ST and hoping, every time you change something. EmuMD lets you skip all that and run your firmware in Hatari instead, on your Mac or PC, right alongside the Atari ST software that talks to it.
 
 It builds your firmware's own C code for your computer as a `.mdfw` file, then plugs it into a version of Hatari with a Multi-device on its cartridge port: the ST reads your ROM4 window, your firmware receives its ROM3 commands, and a folder on your computer stands in for the microSD card. Your firmware's cartridge boots just as it would on a real ST, and you can log from it, debug it with your usual tools, and test both sides together without flashing anything.
 
@@ -14,7 +14,13 @@ It comes with a simple tool, `mdfw`, to fit it into your workflow, and a skill f
 
 ## Getting started
 
-You'll need a C compiler, CMake, Python 3, git and a [TOS image](https://emutos.sourceforge.io/download.html).
+You'll need a C compiler, CMake, Python 3, git, SDL2 and libpng (for Hatari), and a [TOS image](https://emutos.sourceforge.io/download.html):
+
+- **macOS**: `xcode-select --install` and `brew install cmake sdl2 libpng`
+- **Linux** (Ubuntu, Debian): `sudo apt install build-essential cmake python3 git libsdl2-dev zlib1g-dev libpng-dev`
+- **Windows**: use WSL2 and follow the Linux steps, keeping the repo in your Linux home folder rather than under `/mnt/c`. Hatari's window needs WSLg (built into Windows 11), but `mdfw run --headless` works either way.
+
+Then:
 
 1. Clone this repo.
 2. Build Hatari with Multi-device support: `make hatari`
@@ -52,7 +58,7 @@ The repo includes a skill for AI coding agents ([skills/emumd/SKILL.md](skills/e
 - EmuMD builds your firmware from source, so it can't run `.uf2` files.
 - Anything below the Pico SDK (PIO, DMA, Wi-Fi, USB, pins) isn't emulated, so code that relies on it needs to be left out or given a stand-in.
 - The emulated Multi-device is infinitely fast, so timing and performance still need testing on real hardware.
-- So far it's only been tested on macOS. Linux should work too, but Windows isn't supported.
+- It's been tested on macOS and Linux (Ubuntu 24.04), and should work in WSL2 on Windows, but it doesn't run on Windows itself.
 
 ## What's next?
 

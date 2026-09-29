@@ -25,8 +25,9 @@ the same `--md-firmware` option.
 
 ## Quick start
 
-You need a C compiler, CMake, Python 3 and git; for the ST side of the
-example, a TOS image.
+You need a C compiler, CMake, Python 3, git, and SDL2 and libpng for
+Hatari (the [README](../README.md#getting-started) has the commands for
+macOS, Linux and WSL); for the ST side of the example, a TOS image.
 
 ```sh
 make hatari      # Hatari 2.6.1 + Multi-device support, in ~/.cache/emumd
