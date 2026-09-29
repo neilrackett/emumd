@@ -10,7 +10,7 @@ Developing for the SidecarTridge Multi-device usually means building a UF2, copy
 
 It builds your firmware's own C code for your computer as a `.mdfw` file, then plugs it into a version of Hatari with a Multi-device on its cartridge port: the ST reads your ROM4 window, your firmware receives its ROM3 commands, and a folder on your computer stands in for the microSD card. Your firmware's cartridge boots just as it would on a real ST, and you can log from it, debug it with your usual tools, and test both sides together without flashing anything.
 
-It comes with a simple tool, `mdfw`, to fit it into your workflow, and a skill for coding agents.
+It comes with a simple tool, `mdfw`, for creating and working with `.mdfw` files that you can integrate into your workflow, and a skill for coding agents.
 
 ## Getting started
 
