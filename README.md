@@ -18,18 +18,20 @@ EmuMD consists of:
 
 ## Getting started
 
-You'll need a C compiler, CMake, Python 3, git, SDL2 and libpng (for Hatari), and a [TOS image](https://emutos.sourceforge.io/download.html):
+You'll need a C compiler, CMake, Python 3, git, curl, SDL2 and libpng (for Hatari):
 
 - **macOS**: `xcode-select --install` and `brew install cmake sdl2 libpng`
-- **Linux** (Ubuntu, Debian): `sudo apt install build-essential cmake python3 git libsdl2-dev zlib1g-dev libpng-dev`
+- **Linux** (Ubuntu, Debian): `sudo apt install build-essential cmake python3 git curl libsdl2-dev zlib1g-dev libpng-dev`
 - **Windows**: use WSL2 and follow the Linux steps, keeping the repo in your Linux home folder rather than under `/mnt/c`. Hatari's window needs WSLg (built into Windows 11), but `mdfw run --headless` works either way.
 
 Then:
 
 1. Clone this repo.
-2. Build Hatari with Multi-device support: `make hatari`
+2. Build Hatari with Multi-device support, and download [EmuTOS](https://emutos.sourceforge.io) 1.4 to run it with: `make hatari`
 3. Build the example firmware: `make`
-4. Run it: `cd examples/hello` and `../../tools/mdfw run --tos /path/to/tos.img`
+4. Run it: `cd examples/hello` and `../../tools/mdfw run`
+
+`mdfw run` uses the UK EmuTOS image, even if your own Hatari settings name another TOS, unless you give one with `--tos`.
 
 The ST boots with the example's cartridge, prints a greeting the firmware put into ROM4, pings the firmware over ROM3 and prints its answer, as in the screenshot above.
 

@@ -82,7 +82,8 @@ as C++17; `[compile] cxxflags` for C++-only flags.
 
 ```sh
 mdfw hatari        # once: builds the patched Hatari into ~/.cache/emumd
-mdfw run --headless --frames 400 --no-user-config --tos TOS.IMG \
+                   # and downloads EmuTOS 1.4 alongside it
+mdfw run --headless --frames 400 --no-user-config \
          --sd sd --screenshot out.png --log run.log --timeout 300
 ```
 
@@ -93,8 +94,9 @@ options with `-O key=value`, and raw Hatari options after `--`.
 - `--headless` without `--frames` stops after 500 frames (10 s at 50 Hz).
   Never run `mdfw run` without `--headless`/`--frames` in automation: it opens
   a window and runs until closed.
+- The TOS is EmuTOS 1.4 (UK) unless `--tos` or `mdfw.ini` names another.
 - `--no-user-config` ignores the user's Hatari settings (which may add a
-  GEMDOS drive, other TOS, other memory); it then needs `--tos`.
+  GEMDOS drive, other memory).
 - No GEMDOS drive (the default) lets the firmware's cartridge boot code run.
   With `--harddrive DIR` Hatari keeps the first 1 KB of the cartridge, so the
   boot code does not run, but ST programs on that drive can talk to the

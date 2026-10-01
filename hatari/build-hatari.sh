@@ -9,7 +9,9 @@
 # ($EMUMD_CACHE, else ~/.cache/emumd/hatari), shared by every
 # project and kept out of EmuMD itself (often a submodule). The
 # patch is re-applied from clean whenever it changes; later runs just
-# rebuild. Prints the path of the hatari binary last.
+# rebuild. EmuTOS 1.4 (256k, every language) is downloaded alongside,
+# into the cache's emutos-256k-1.4 folder. Prints the path of the
+# hatari binary last.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -18,6 +20,8 @@ CACHE=${EMUMD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/emumd}
 SRC=${1:-$CACHE/hatari}
 HATARI_GIT=${HATARI_GIT:-https://framagit.org/hatari/hatari.git}
 HATARI_TAG=${HATARI_TAG:-v2.6.1}
+EMUTOS_VERSION=${EMUTOS_VERSION:-1.4}
+EMUTOS="$CACHE/emutos-256k-$EMUTOS_VERSION"
 PATCH="$HERE/hatari-multidevice.patch"
 
 sha1() { if command -v shasum >/dev/null; then shasum -a 1; else sha1sum; fi | cut -d' ' -f1; }
@@ -25,6 +29,19 @@ sha1() { if command -v shasum >/dev/null; then shasum -a 1; else sha1sum; fi | c
 if [ ! -d "$SRC" ]; then
     mkdir -p "$(dirname "$SRC")"
     git clone --depth 1 --branch "$HATARI_TAG" "$HATARI_GIT" "$SRC" >&2
+fi
+
+# A free TOS to boot it with; unpacked aside first, so an interrupted
+# download is tried again next time.
+if [ ! -d "$EMUTOS" ]; then
+    mkdir -p "$CACHE"
+    TMP=$(mktemp -d "$CACHE/.emutos.XXXXXX")
+    trap 'rm -rf "$TMP"' EXIT
+    echo "Downloading EmuTOS $EMUTOS_VERSION" >&2
+    curl -fsSL -o "$TMP/emutos.zip" \
+        "https://downloads.sourceforge.net/project/emutos/emutos/$EMUTOS_VERSION/emutos-256k-$EMUTOS_VERSION.zip"
+    python3 -m zipfile -e "$TMP/emutos.zip" "$TMP"
+    mv "$TMP/emutos-256k-$EMUTOS_VERSION" "$EMUTOS"
 fi
 
 # (Re)apply the patch to clean sources when it is new or has changed.
@@ -62,4 +79,5 @@ cmake --build "$SRC/build" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 # What it was built from, for mdfw run to compare (same files, same order).
 cat "$PATCH" "$HERE/multidevice.c" "$HERE/multidevice.h" "$ROOT/include/emumd_plugin.h" \
     | sha1 > "$SRC/.emumd-stamp"
+echo "EmuTOS $EMUTOS_VERSION: $EMUTOS/etos256uk.img (and other languages)" >&2
 echo "$SRC/build/src/hatari"

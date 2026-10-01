@@ -4,7 +4,8 @@
 #
 #   make           build the example firmware (examples/hello)
 #   make test      the runtime's self-test
-#   make hatari    Hatari 2.6.1 with Multi-device support (~/.cache/emumd)
+#   make hatari    Hatari 2.6.1 with Multi-device support, and EmuTOS 1.4
+#                  (~/.cache/emumd)
 #   make clean
 
 MDFW := tools/mdfw

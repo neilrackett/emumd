@@ -25,17 +25,18 @@ the same `--md-firmware` option.
 
 ## Quick start
 
-You need a C compiler, CMake, Python 3, git, and SDL2 and libpng for
-Hatari (the [README](../README.md#getting-started) has the commands for
-macOS, Linux and WSL); for the ST side of the example, a TOS image.
+You need a C compiler, CMake, Python 3, git, curl, and SDL2 and libpng
+for Hatari (the [README](../README.md#getting-started) has the commands
+for macOS, Linux and WSL).
 
 ```sh
-make hatari      # Hatari 2.6.1 + Multi-device support, in ~/.cache/emumd
+make hatari      # Hatari 2.6.1 + Multi-device support, and EmuTOS 1.4,
+                 # in ~/.cache/emumd
 make             # the example firmware -> examples/hello/build/hello.mdfw
 make test        # the runtime's self-test
 
 cd examples/hello
-../../tools/mdfw run --tos /path/to/tos206.img
+../../tools/mdfw run
 ```
 
 The ST boots with the example's cartridge, which prints a greeting the
@@ -87,7 +88,7 @@ A CI job, for example:
 git submodule update --init
 emu/emumd/tools/mdfw hatari
 emu/emumd/tools/mdfw run --headless --frames 600 --no-user-config \
-    --tos "$TOS_IMAGE" --screenshot boot.png --log boot.log
+    --screenshot boot.png --log boot.log
 grep -q "my firmware is ready" boot.log
 ```
 
@@ -107,7 +108,9 @@ grep -q "my firmware is ready" boot.log
 `mdfw run` uses `$EMUMD_HATARI`, or `hatari` in `mdfw.ini`'s `[run]`
 section, or the Hatari that `mdfw hatari` built. It turns Hatari's GEMDOS
 drive off unless you ask for one (`--harddrive DIR`), so your firmware's
-cartridge boots; see [Hatari](#hatari) for why.
+cartridge boots; see [Hatari](#hatari) for why. Its TOS is `--tos`, or
+`tos` in `[run]`, or else the EmuTOS 1.4 (UK) that `mdfw hatari`
+downloaded, whatever your own Hatari settings say.
 
 For scripts, CI and agents, `mdfw run` can run unattended:
 
@@ -118,7 +121,7 @@ For scripts, CI and agents, `mdfw run` can run unattended:
 | `--screenshot out.png` | Save the last frame (taken from Hatari's own recording; nothing else to install) |
 | `--log FILE` | Keep Hatari's output, including your firmware's log lines |
 | `--timeout SECONDS` | Stop Hatari after this long, whatever happens |
-| `--no-user-config` | Ignore your own Hatari settings (give `--tos` then) |
+| `--no-user-config` | Ignore your own Hatari settings |
 | `-O key=value`, `-V` | `--md-option key=value`, `--md-verbose on` |
 
 If Hatari crashes (the firmware's own crash, often, or the `abort()` of a
@@ -156,7 +159,7 @@ ldflags =
 
 [run]                         ; defaults for mdfw run
 sd = sd                       ; the microSD card folder
-tos = /path/to/tos.img
+tos = /path/to/tos.img        ; default: EmuTOS 1.4 (UK)
 machine = megaste
 harddrive =                   ; a GEMDOS drive C: for the ST side's files
 options =                     ; --md-option key=value, one per line
@@ -302,7 +305,9 @@ RAM: `init` should set up whatever it relies on.
 
 `hatari/` holds a patch for Hatari 2.6.1 and the files it adds;
 `hatari/build-hatari.sh` (or `make hatari`, or `mdfw hatari`) clones Hatari
-into `~/.cache/emumd/hatari`, applies it and builds. New options,
+into `~/.cache/emumd/hatari`, applies it and builds. It also downloads
+the 256k EmuTOS 1.4 images, in every language, into
+`~/.cache/emumd/emutos-256k-1.4`. New options,
 also kept in a `[MultiDevice]` section of `hatari.cfg`:
 
 | Option | |

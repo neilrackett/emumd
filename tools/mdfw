@@ -43,6 +43,8 @@ CACHE = os.environ.get("EMUMD_CACHE") or os.path.join(
     os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "emumd")
 HATARI_SRC = os.path.join(CACHE, "hatari")
 DEFAULT_HATARI = os.path.join(HATARI_SRC, "build", "src", "hatari")
+# Downloaded by build-hatari.sh too; mdfw run's TOS unless told otherwise.
+DEFAULT_TOS = os.path.join(CACHE, "emutos-256k-1.4", "etos256uk.img")
 # What the patched Hatari is built from: build-hatari.sh stores their SHA-1
 # as .emumd-stamp, so a Hatari older than this EmuMD is spotted.
 HATARI_INPUTS = ["hatari/hatari-multidevice.patch", "hatari/multidevice.c",
@@ -308,6 +310,7 @@ cflags = -O2
 ; Defaults for mdfw run.
 ; sd = sd              ; folder standing in for the microSD card
 ; tos = /path/to/tos.img
+;                      ; (default: EmuTOS 1.4, UK)
 ; machine = megaste
 ; harddrive =          ; a GEMDOS drive C: (off by default, so the
 ;                      ; firmware's cartridge boots)
@@ -473,6 +476,8 @@ def cmd_run(args):
     tos = setting(args.tos, "tos")
     if tos:
         cmd += ["--tos", as_path(tos)]
+    elif os.path.exists(DEFAULT_TOS):
+        cmd += ["--tos", DEFAULT_TOS]
     machine = setting(args.machine, "machine")
     if machine:
         cmd += ["--machine", machine]
@@ -659,7 +664,8 @@ def main():
     p.add_argument("firmware", nargs="?", help=".mdfw file (default: build mdfw.ini's)")
     p.add_argument("-f", "--file", help="the project file (default: ./mdfw.ini)")
     p.add_argument("--sd", help="folder standing in for the microSD card")
-    p.add_argument("--tos", help="TOS image")
+    p.add_argument("--tos", help="TOS image (default: the EmuTOS that "
+                   "mdfw hatari downloaded)")
     p.add_argument("--machine", help="st, ste, megaste, ...")
     p.add_argument("--harddrive", help="GEMDOS drive C: folder (default: none)")
     p.add_argument("-O", "--option", action="append", metavar="KEY=VALUE",
@@ -675,7 +681,7 @@ def main():
     p.add_argument("--timeout", type=float, metavar="SECONDS",
                    help="stop Hatari after this long, whatever happens")
     p.add_argument("--no-user-config", action="store_true",
-                   help="ignore your own Hatari settings (give --tos then)")
+                   help="ignore your own Hatari settings")
     p.add_argument("-v", "--verbose", action="store_true", help="show build commands")
     p.set_defaults(func=cmd_run)
     p.epilog = "Anything after -- goes to Hatari as it is."
