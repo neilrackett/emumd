@@ -1,8 +1,10 @@
 SidecarTridge Multi-device support for Hatari 2.6.1 (EmuMD).
 Options --md-firmware/--md-sd/--md-option/--md-verbose, a [MultiDevice]
 config section, a .mdfw as the last argument, and the cartridge bank
-that routes ROM3/ROM4 to the firmware. build-hatari.sh applies it and
-adds multidevice.c, multidevice.h and emumd_plugin.h.
+that routes ROM3/ROM4 to the firmware. Also leftdown, leftup and
+mousemove <dx> <dy> events for --cmd-fifo, so scripts can use the mouse.
+build-hatari.sh applies it and adds multidevice.c, multidevice.h and
+emumd_plugin.h.
 
 diff -ruN a/src/configuration.c b/src/configuration.c
 --- a/src/configuration.c
@@ -69,6 +71,45 @@ diff -ruN a/src/configuration.c b/src/configuration.c
  	Configuration_SaveSection(sConfigFileName, configs_Lilo, "[LILO]");
  	Configuration_SaveSection(sConfigFileName, configs_Rs232, "[RS232]");
  	Configuration_SaveSection(sConfigFileName, configs_Printer, "[Printer]");
+diff -ruN a/src/control.c b/src/control.c
+--- a/src/control.c
++++ b/src/control.c
+@@ -154,6 +154,23 @@
+ 	if (strcmp(event, "doubleclick") == 0) {
+ 		Keyboard.LButtonDblClk = 1;
+ 		return true;
++	}
++	if (strcmp(event, "leftdown") == 0) {
++		Keyboard.bLButtonDown |= BUTTON_MOUSE;
++		return true;
++	}
++	if (strcmp(event, "leftup") == 0) {
++		Keyboard.bLButtonDown &= ~BUTTON_MOUSE;
++		return true;
++	}
++	if (strncmp(event, "mousemove ", 10) == 0) {
++		/* in ST pixels, added to host mouse motion */
++		int dx, dy;
++		if (sscanf(event + 10, "%d %d", &dx, &dy) == 2) {
++			KeyboardProcessor.Mouse.dx += dx;
++			KeyboardProcessor.Mouse.dy += dy;
++			return true;
++		}
+ 	}
+ 	if (strcmp(event, "rightdown") == 0) {
+ 		Keyboard.bRButtonDown |= BUTTON_MOUSE;
+@@ -170,8 +187,11 @@
+ 	fprintf(stderr,
+ 		"Supported mouse button and key events are:\n"
+ 		"- doubleclick\n"
++		"- leftdown\n"
++		"- leftup\n"
+ 		"- rightdown\n"
+ 		"- rightup\n"
++		"- mousemove <dx> <dy>\n"
+ 		"- keypress <key>\n"
+ 		"- keydown <key>\n"
+ 		"- keyup <key>\n"
 diff -ruN a/src/cpu/memory.c b/src/cpu/memory.c
 --- a/src/cpu/memory.c
 +++ b/src/cpu/memory.c

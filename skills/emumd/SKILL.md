@@ -107,7 +107,15 @@ options with `-O key=value`, and raw Hatari options after `--`.
   about speed or timeouts; that needs real hardware.
 - To type into the ST: `-- --cmd-fifo FILE`, then write
   `hatari-event keypress 28` (ST scancodes; `keydown`/`keyup` to hold)
-  to FILE while it runs.
+  to FILE while it runs. Use `keypress` for typing: with `--headless`'s
+  fast-forward, a host pause between `keydown` and `keyup` lasts long
+  enough for TOS to repeat the key. `keypress 0` is scancode 0, not the
+  digit (that is 11).
+- To use the mouse, write `hatari-event mousemove DX DY` (relative, in ST
+  pixels), `leftdown` and `leftup` to the same FILE. Pin the pointer
+  first, e.g. `mousemove -100 0` four times then `mousemove 0 -100` three
+  times (left then up, so it does not open menus on the way), and later
+  moves land at known positions.
 - A reboot keeps the firmware's variables (the RP2040 would start
   afresh), so `init` must set up what it relies on.
 - If mdfw warns that Hatari was built from a different version of EmuMD, run

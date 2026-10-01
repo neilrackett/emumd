@@ -319,6 +319,12 @@ also kept in a `[MultiDevice]` section of `hatari.cfg`:
 
 A `.mdfw` given as Hatari's last argument is loaded as the firmware.
 
+The patch also adds `leftdown`, `leftup` and `mousemove <dx> <dy>` to the
+events Hatari's `--cmd-fifo` takes (`hatari-event <event>`), so scripts
+and coding agents can use the ST's mouse as well as its keyboard.
+`mousemove` is relative and in ST pixels: move far up and left first to
+pin the pointer to the corner, and later moves land at known positions.
+
 Hatari's own GEMDOS drive emulation needs its own cartridge program at
 $FA0000. When a GEMDOS drive (or an extended VDI mode) is on, Hatari keeps
 the first 1 KB of the cartridge and your firmware gets the rest, so its
