@@ -496,28 +496,39 @@ def cmd_run(args):
     if args.md_verbose:
         cmd += ["--md-verbose", "on"]
 
+    hatari_args = shlex.split(proj.get("run", "hatari_args")) if proj else []
+    hatari_args += args.hatari_args
     frames = args.frames or (500 if args.headless else 0)
     tmp = None
     if args.headless:
         env["SDL_VIDEODRIVER"] = "dummy"
         env["SDL_AUDIODRIVER"] = "dummy"
-        cmd += ["--sound", "off", "--fast-boot", "on", "--fast-forward", "on"]
+        if not args.record:  # a recording keeps it, though nothing plays
+            cmd += ["--sound", "off"]
+        cmd += ["--fast-boot", "on", "--fast-forward", "on"]
     if frames:
         cmd += ["--run-vbls", str(frames)]
-    if args.screenshot or args.no_user_config:
+    if (args.screenshot and not args.record) or args.no_user_config:
         tmp = tempfile.mkdtemp(prefix="mdfw-run-")
-    if args.screenshot:
-        # Every frame is recorded to keep the last, so compress them
+    avi = os.path.abspath(args.record) if args.record else (
+        os.path.join(tmp, "screen.avi") if args.screenshot else None)
+    if avi:
+        # A screenshot is the last frame of a recording. Compress frames
         # lightly: at Hatari's default level, a busy picture slows a run
         # tenfold.
         cmd += ["--avirecord", "--avi-vcodec", "png", "--png-level", "1",
-                "--avi-file", os.path.join(tmp, "screen.avi")]
+                "--avi-file", avi]
+    if args.record:
+        # Every frame, without the status bar, at the ST's rate (else the
+        # 60 Hz it starts at, before TOS sets 50); -- --avi-fps N overrides.
+        mono = ["--monitor", "mono"] in [hatari_args[i:i + 2]
+                                         for i in range(len(hatari_args))]
+        cmd += ["--frameskips", "0", "--crop", "on",
+                "--avi-fps", "71" if mono else "50"]
     if args.no_user_config:
         env["HOME"] = tmp  # Hatari's own config lives under $HOME
 
-    if proj:
-        cmd += shlex.split(proj.get("run", "hatari_args"))
-    cmd += args.hatari_args
+    cmd += hatari_args
     cmd += ["--md-firmware", firmware]
     print(" ".join(shlex.quote(c) for c in cmd), flush=True)
 
@@ -548,11 +559,17 @@ def cmd_run(args):
     if log:
         log.close()
     if args.screenshot:
-        if last_avi_frame(os.path.join(tmp, "screen.avi"), args.screenshot):
+        if last_avi_frame(avi, args.screenshot):
             print("screenshot: %s" % args.screenshot)
         else:
             sys.stderr.write("mdfw: no frame recorded for the screenshot\n")
             rc = rc or 1
+    if args.record and os.path.exists(avi):
+        if rc < 0:  # Hatari had no chance to finish the file
+            sys.stderr.write("mdfw: Hatari was stopped, so %s is unfinished\n"
+                             % args.record)
+        else:
+            print("recording: %s" % args.record)
     if tmp:
         shutil.rmtree(tmp, ignore_errors=True)
     if rc < 0 and not timed_out.is_set():
@@ -677,6 +694,8 @@ def main():
                    help="no window or sound, as fast as possible (500 frames unless --frames)")
     p.add_argument("--frames", type=int, metavar="N", help="quit after N frames (VBLs)")
     p.add_argument("--screenshot", metavar="PNG", help="save the last frame as a PNG")
+    p.add_argument("--record", metavar="AVI",
+                   help="record video and sound (at 50 Hz; -- --avi-fps N for others)")
     p.add_argument("--log", metavar="FILE", help="also save Hatari's output to FILE")
     p.add_argument("--timeout", type=float, metavar="SECONDS",
                    help="stop Hatari after this long, whatever happens")

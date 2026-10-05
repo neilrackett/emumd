@@ -46,7 +46,7 @@ emu/emumd/tools/mdfw build    # builds build/<name>.mdfw
 emu/emumd/tools/mdfw run      # runs it in Hatari
 ```
 
-In `mdfw.ini` you list the C files that make up your firmware's logic, leaving out anything that sets up hardware (PIO, DMA, clocks, the SD card driver), and `emu/mdfw_app.c` does what your `main()` does once the hardware is ready. `mdfw run --headless` runs it without a window and can save a screenshot, which is handy for automated tests.
+In `mdfw.ini` you list the C files that make up your firmware's logic, leaving out anything that sets up hardware (PIO, DMA, clocks, the SD card driver), and `emu/mdfw_app.c` does what your `main()` does once the hardware is ready. `mdfw run --headless` runs it without a window and can save a screenshot, which is handy for automated tests, and `--record out.avi` records video and sound. In Hatari's window, Cmd+A (AltGr+A on Linux) starts and stops a recording, and Cmd+O or F12 opens its options.
 
 You can also load a `.mdfw` into Hatari yourself, with `--md-firmware myapp.mdfw` or by giving it as the last argument, just like a `.prg`.
 

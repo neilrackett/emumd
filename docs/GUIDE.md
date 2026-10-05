@@ -119,6 +119,7 @@ For scripts, CI and agents, `mdfw run` can run unattended:
 | `--headless` | No window or sound, fast-forward; stops after 500 frames unless `--frames` says otherwise |
 | `--frames N` | Quit after N frames (50 a second on a PAL ST) |
 | `--screenshot out.png` | Save the last frame (taken from Hatari's own recording; nothing else to install) |
+| `--record out.avi` | Record video and sound: every frame, without the status bar, at 50 Hz (71 with `-- --monitor mono`; `-- --avi-fps 60` for a 60 Hz TOS). A run that ends by itself finishes the file; one stopped by `--timeout` cannot |
 | `--log FILE` | Keep Hatari's output, including your firmware's log lines |
 | `--timeout SECONDS` | Stop Hatari after this long, whatever happens |
 | `--no-user-config` | Ignore your own Hatari settings |
@@ -324,6 +325,14 @@ events Hatari's `--cmd-fifo` takes (`hatari-event <event>`), so scripts
 and coding agents can use the ST's mouse as well as its keyboard.
 `mousemove` is relative and in ST pixels: move far up and left first to
 pin the pointer to the corner, and later moves land at known positions.
+And `--run-vbls` (`mdfw run --frames`) quits as closing the window does,
+so a recording it ends is a finished file.
+
+EmuMD's Hatari is built without the macOS app bundle, so it has no menu
+bar: use its shortcuts instead. Cmd+A starts and stops recording video
+(an AVI with sound), Cmd+Y records sound only, and Cmd+O or F12 (fn+F12 on
+most Mac keyboards) opens the options. On Linux, right Alt (AltGr) takes
+the place of Cmd.
 
 Hatari's own GEMDOS drive emulation needs its own cartridge program at
 $FA0000. When a GEMDOS drive (or an extended VDI mode) is on, Hatari keeps

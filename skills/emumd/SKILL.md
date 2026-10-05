@@ -102,6 +102,9 @@ options with `-O key=value`, and raw Hatari options after `--`.
   boot code does not run, but ST programs on that drive can talk to the
   firmware. Autostart one with `-- --auto 'C:\PROG.TOS'`.
 - Big ST programs need more RAM: `-- --memsize 4`.
+- `--record out.avi` records video and sound, every frame at 50 Hz
+  (`-- --avi-fps 60` for a 60 Hz TOS). Let the run end by itself
+  (`--frames`): one stopped by `--timeout` leaves the AVI unfinished.
 - The ST's text screen is 40 columns in low resolution.
 - The emulated Multi-device is infinitely fast: do not draw conclusions
   about speed or timeouts; that needs real hardware.

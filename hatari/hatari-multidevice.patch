@@ -3,7 +3,8 @@ Options --md-firmware/--md-sd/--md-option/--md-verbose, a [MultiDevice]
 config section, a .mdfw as the last argument, and the cartridge bank
 that routes ROM3/ROM4 to the firmware. Also leftdown, leftup and
 mousemove <dx> <dy> events for --cmd-fifo, so scripts can use the mouse,
-and "EmuMD - " before the window title.
+"EmuMD - " before the window title, and --run-vbls quitting as from the
+window, so recordings are finished.
 build-hatari.sh applies it and adds multidevice.c, multidevice.h and
 emumd_plugin.h.
 
@@ -263,7 +264,18 @@ diff -ruN a/src/main.c b/src/main.c
  #include "version.h"
  #include "configuration.h"
  #include "control.h"
-@@ -751,7 +752,7 @@
+@@ -352,7 +353,9 @@
+ 	{
+ 		/* show VBLs/s */
+ 		Main_PauseEmulation(true);
+-		exit(0);
++		/* quit as from the window, so recordings are finished */
++		Main_SetQuitValue(0);
++		return;
+ 	}
+ 
+ //	FrameDuration_micro = (int64_t) ( 1000000.0 / nScreenRefreshRate + 0.5 );	/* round to closest integer */
+@@ -751,7 +754,7 @@
  	if (title)
  		SDL_SetWindowTitle(sdlWindow, title);
  	else
@@ -272,7 +284,7 @@ diff -ruN a/src/main.c b/src/main.c
  }
  
  /*-----------------------------------------------------------------------*/
-@@ -862,6 +863,7 @@
+@@ -862,6 +865,7 @@
   */
  static void Main_UnInit(void)
  {
