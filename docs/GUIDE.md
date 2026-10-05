@@ -194,7 +194,9 @@ Everything is built as the Pico SDK builds for a host: `PICO_BUILD=1`
 and `PICO_ON_DEVICE=0` are defined, as is `EMUMD=1` for anything that
 has to differ, and enums are the RP2040's sizes (`-fshort-enums`), so
 structures kept in flash or shared memory are laid out as on the
-device.
+device. `_FORTIFY_SOURCE` is off, as on the RP2040: firmware treats its
+linker symbols (`extern unsigned int __rom_in_ram_start__`) as the
+regions they start, which its checks would stop as overflows.
 
 ## Preparing a firmware
 
@@ -228,6 +230,7 @@ What EmuMD stands in for:
 
 - **The template's hardware sources**: `romemul.c`, `commemul.c`,
   `select.c`, `hw_config.c` and `sdcard.c` are left out of `[sources]`.
+  `sdcard.h`'s calls work on the microSD folder (`sd` in `[run]`).
   ROM3 reads reach the firmware as the PIO and DMA would deliver them,
   through commemul or, in the older template (`init_romemul()` with
   callbacks), the lookup DMA channel's register and its interrupt handler.
@@ -253,7 +256,9 @@ them out as static functions), and ARM assembly behind
 (`defined(__arm__)` is the 32-bit RP2040's). A glue file's `mdfw_app`,
 if you write one, replaces EmuMD's.
 
-[MD/JS](https://github.com/neilrackett/md-js) is built this way.
+[MD/JS](https://github.com/neilrackett/md-js) and
+[MD/Net](https://github.com/neilrackett/md-net) are built this way, Wi-Fi
+and all; each has an `emu/test.sh` that drives it from an ST program.
 
 ### Any other firmware
 

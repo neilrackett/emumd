@@ -165,8 +165,12 @@ def compile_flags(proj):
     # -fshort-enums: enums take the RP2040's sizes (arm-none-eabi's), so the
     # structures a firmware keeps in flash or shared memory are laid out
     # the same.
+    # No _FORTIFY_SOURCE (macOS and Ubuntu turn it on): firmware treats its
+    # linker symbols (`extern unsigned int __rom_in_ram_start__`) as the
+    # regions they start, which its checks would take for overflows.
     flags = ["-fPIC", "-fvisibility=hidden", "-fshort-enums", "-g", "-Wall",
-             "-Wno-unused-function", "-Wno-missing-braces"] + proj.cflags
+             "-Wno-unused-function", "-Wno-missing-braces",
+             "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0"] + proj.cflags
     # Your shims, then the runtime's (they replace the Pico SDK, FatFs and
     # the templates' debug.h, even where your include folders have their
     # hardware versions), then your include folders (one has your
@@ -518,6 +522,7 @@ cflags = -O2
 {wifi}
 [run]
 machine = ste
+sd = build/sd          ; the microSD card: a folder (made if need be)
 """
 
 WIFI_INI_SECTION = """
@@ -666,8 +671,11 @@ def warn_if_stale(hatari):
 
 def last_avi_frame(avi, png):
     """Hatari records PNG frames ('00dc' chunks): keep the last one."""
-    with open(avi, "rb") as f:
-        data = f.read()
+    try:
+        with open(avi, "rb") as f:
+            data = f.read()
+    except OSError:  # Hatari stopped before its first frame
+        return False
     last = None
     i = data.find(b"00dc")
     while i >= 0:
@@ -722,6 +730,7 @@ def cmd_run(args):
         cmd += ["--harddrive", "none"]  # so the firmware's cartridge boots
     sd = setting(args.sd, "sd")
     if sd:
+        os.makedirs(as_path(sd), exist_ok=True)
         cmd += ["--md-sd", as_path(sd)]
     options = list(proj.lines("run", "options")) if proj else []
     options += args.option or []

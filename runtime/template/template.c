@@ -13,6 +13,7 @@
  *                them: through commemul, or (the older template) the
  *                lookup DMA channel's register and its interrupt handler.
  *              - The SELECT button (select.c), which is not pressed.
+ *              - The microSD card (sdcard.c): sdcard.c in this folder.
  *              - The Booster: on blank flash, this does what its first
  *                run would (this app boots, with a settings sector, and a
  *                Wi-Fi network to join), and a jump to it stops the
