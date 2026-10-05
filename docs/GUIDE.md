@@ -16,8 +16,10 @@ cartridge bus. So:
 - **The Multi-device is infinitely fast.** A command runs to completion
   the moment its last word arrives. Speed, timeouts and races between the
   two cores need real hardware.
-- **Anything below the Pico SDK is not emulated**: PIO programs, DMA, Wi-Fi,
-  USB, pins. Firmware that needs them in its logic will need stand-ins.
+- **Anything below the Pico SDK is not emulated**: PIO programs, DMA, USB,
+  pins. Firmware that needs them in its logic will need stand-ins. Wi-Fi
+  is the exception: a Pico W's goes through your computer's own network
+  (see [Wi-Fi](#wi-fi)).
 
 Running unmodified `.uf2` files would take an RP2040 emulator (both cores,
 PIO, DMA, SPI, the boot ROM) under Hatari; that is on the roadmap, behind
@@ -34,6 +36,7 @@ make hatari      # Hatari 2.6.1 + Multi-device support, and EmuTOS 1.4,
                  # in ~/.cache/emumd
 make             # the example firmware -> examples/hello/build/hello.mdfw
 make test        # the runtime's self-test
+make test-wifi   # Wi-Fi's, with the Wi-Fi example (needs libslirp)
 
 cd examples/hello
 ../../tools/mdfw run
@@ -158,6 +161,11 @@ cflags = -O2                  ; C and C++
 cxxflags =                    ; C++ only
 ldflags =
 
+[wifi]                        ; the Pico W's Wi-Fi (see Wi-Fi, below)
+lwip = pico-sdk/lib/lwip      ; default: lwIP 2.2.1, downloaded once
+apps = http/http_client.c     ; lwIP apps, from its src/apps
+arch = poll                   ; or background
+
 [run]                         ; defaults for mdfw run
 sd = sd                       ; the microSD card folder
 tos = /path/to/tos.img        ; default: EmuTOS 1.4 (UK)
@@ -192,7 +200,8 @@ EmuMD you keep the loop's work and leave the hardware out:
 1. `mdfw init` in your repository.
 2. List the sources that hold your firmware's logic in `mdfw.ini`, and
    leave out the ones that only set up hardware: `main.c`, `romemul.c`,
-   `commemul.c`, `sdcard.c`, `hw_config.c`, the Wi-Fi and display code.
+   `commemul.c`, `sdcard.c`, `hw_config.c`, the display code. Keep the
+   Wi-Fi code if you want it to work (see [Wi-Fi](#wi-fi)).
 3. Fill in `emu/mdfw_app.c`: what `main()` does after the hardware set-up,
    and one pass of the main loop.
 
@@ -291,6 +300,8 @@ What stands in for what:
 | Hardware divider | C division, with the divider's results for division by zero |
 | `DPRINTF` | Hatari's log, with `--md-verbose on` |
 | `watchdog_reboot` | The firmware is powered off and on; `watchdog_hw->scratch[]` survives that, and is cleared by a cold reset |
+| Wi-Fi (CYW43), `cyw43_arch`, `async_context` | With `[wifi]`: any network can be joined, and the chip's frames go to your computer's network (see [Wi-Fi](#wi-fi)) |
+| Board ID, `get_rand_32()` & co. | A fixed ID (`--md-option board_id=` for another); your computer's random numbers |
 | GPIO, IRQ set-up, clocks, DMA, PIO headers | Accepted and ignored |
 
 The firmware's `poll` runs on Hatari's thread whenever the ST reads the
@@ -301,6 +312,99 @@ Its `main` and core 1, if started, run alongside.
 A reboot powers the firmware off and on again in the same process, so
 its variables keep their values, where the RP2040 would start with fresh
 RAM: `init` should set up whatever it relies on.
+
+## Wi-Fi
+
+<img src="wifi.png" width="640" alt="Hatari running the Wi-Fi example: the ST joins the network as 10.0.2.15, asks the firmware for a web page and prints it" />
+
+A Pico W firmware's Wi-Fi works in EmuMD. Add `[wifi]` to `mdfw.ini` and
+the firmware's own network code (`cyw43_arch`, lwIP and whatever it
+builds on them) runs as it is, over your computer's own network
+connection. Joining succeeds whatever the network's name and password
+(they are not checked), then the device gets an address by DHCP, looks
+names up by DNS, and can reach whatever your computer can. Nothing needs
+setting up, and no special permissions: as QEMU's user networking does,
+with the same library (libslirp), EmuMD makes the device's connections
+from your computer, as an ordinary program.
+
+```ini
+[compile]
+include =
+    rp/src                    ; where lwipopts.h is
+    rp/src/include
+
+[wifi]
+lwip = pico-sdk/lib/lwip      ; your Pico SDK's lwIP (default: 2.2.1,
+                              ; the SDK's, downloaded once)
+apps = http/http_client.c     ; the lwIP apps you use, from its src/apps
+arch = poll                   ; or background: as CMakeLists.txt links
+                              ; pico_cyw43_arch_lwip_poll or
+                              ; pico_cyw43_arch_lwip_threadsafe_background
+```
+
+It needs libslirp: `brew install libslirp pkg-config` on macOS, or
+`sudo apt install libslirp-dev libglib2.0-dev pkg-config` on Linux.
+
+Keep your own network code in `[sources]`, and leave lwIP and the CYW43
+driver out: EmuMD builds lwIP with your `lwipopts.h`, and stands in for
+the chip, `cyw43_arch` and `async_context` itself.
+
+The device's network looks like this:
+
+| Address | |
+| --- | --- |
+| 10.0.2.15 | The device (from DHCP) |
+| 10.0.2.2 | The router, and also your computer: a server on your computer's `localhost:8000` is `http://10.0.2.2:8000/` to the device |
+| 10.0.2.3 | DNS, which asks your computer's |
+
+`--md-option`s (`-O` with `mdfw run`):
+
+| Option | |
+| --- | --- |
+| `wifi=badauth` | Joining fails as it would with the wrong password (`CYW43_LINK_BADAUTH`). Also `nonet` (no such network), `fail`, and `off` (no networks at all, so scans find none) |
+| `wifi_join_ms=N` | How long joining takes, in emulated time (250) |
+| `wifi_rssi=N` | Signal strength, in dBm (-45) |
+| `wifi_forward=tcp:8080:80` | Lets your computer connect to the device: `localhost:8080` reaches its port 80. Separate several with commas; `udp:` for UDP |
+| `wifi_pcap=FILE` | Saves every frame, both ways, for Wireshark |
+| `board_id=E6614103E74D4401` | The board ID; its last 3 bytes end the MAC address, 28:CD:C1:4D:44:01 by default |
+
+Things to know:
+
+- **Credentials.** A firmware on the SidecarTridge template keeps the
+  network's name and password in its settings in flash, and does not try
+  to join without a name. Any will do, so set one in your glue file's
+  `init`: `settings_put_string(gconfig_getContext(), PARAM_WIFI_SSID,
+  "EmuMD");` (or keep a flash file with the settings, `-O flash=FILE`).
+- **Waiting for the network.** On the firmware's own threads (`main`, core
+  1), waiting for work (`cyw43_arch_wait_for_work_until()`,
+  `async_context_wait_for_work_ms()`) waits for the network as well as
+  for emulated time. On the emulator's thread (`init`, `poll`), it moves
+  emulated time on instead, as sleeping does there. That is fine for
+  joining and DHCP, which never leave EmuMD, but anything that has to
+  wait for your computer's network (DNS, a TCP connection) has to be
+  polled across calls, or waited for on the firmware's own thread.
+- **Fast-forward.** Replies come in real time, but the firmware's timeouts
+  run in emulated time, which `--headless` runs far ahead. So while frames
+  are moving, EmuMD holds Hatari back to real time; when the network is
+  quiet, Hatari runs as fast as it can.
+- **A power cycle** (a cold reset, or `watchdog_reboot()`) switches the
+  chip off and on: connections are dropped and DHCP starts again. lwIP is
+  set up only once, as the Pico SDK does, so the rest of its state
+  carries over, as the firmware's own variables do.
+- **The radio itself is not emulated:** signal, interference, speed and the
+  chip's timing need a real Pico W. Access point mode starts, but nothing
+  can join it. lwIP has to run without an OS (`NO_SYS=1`, as with both
+  `pico_cyw43_arch_lwip_*` libraries).
+- **clang and `network.c`.** The SidecarTridge template's `network_scan()`
+  uses GCC's nested functions, which clang (macOS's `cc`) cannot build.
+  They use only globals, so they can move out of the function unchanged,
+  as static functions.
+
+`examples/wifi` is a small firmware that joins, then fetches a web page
+whenever the ST asks and puts it in ROM4 for the ST to print, and serves a
+page of its own on port 80 (`make run`, `make run URL=http://...`, or
+`-O wifi_forward=tcp:8080:80` and open `http://localhost:8080`).
+`make test-wifi` runs it without Hatari, against a web server of its own.
 
 ## Hatari
 

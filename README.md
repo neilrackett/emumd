@@ -24,6 +24,8 @@ You'll need a C compiler, CMake, Python 3, git, curl, SDL2 and libpng (for Hatar
 - **Linux** (Ubuntu, Debian): `sudo apt install build-essential cmake python3 git curl libsdl2-dev zlib1g-dev libpng-dev`
 - **Windows**: use WSL2 and follow the Linux steps, keeping the repo in your Linux home folder rather than under `/mnt/c`. Hatari's window needs WSLg (built into Windows 11), but `mdfw run --headless` works either way.
 
+For Pico W firmware that uses Wi-Fi, you'll also need libslirp: `brew install libslirp pkg-config` on macOS, or `sudo apt install libslirp-dev libglib2.0-dev pkg-config` on Linux.
+
 Then:
 
 1. Clone this repo.
@@ -48,6 +50,8 @@ emu/emumd/tools/mdfw run      # runs it in Hatari
 
 In `mdfw.ini` you list the C files that make up your firmware's logic, leaving out anything that sets up hardware (PIO, DMA, clocks, the SD card driver), and `emu/mdfw_app.c` does what your `main()` does once the hardware is ready. `mdfw run --headless` runs it without a window and can save a screenshot, which is handy for automated tests, and `--record out.avi` records video and sound. In Hatari's window, Cmd+A (AltGr+A on Linux) starts and stops a recording, and Cmd+O or F12 opens its options.
 
+If your firmware uses the Pico W's Wi-Fi, add a `[wifi]` section to `mdfw.ini` and it'll work too, through your computer's own network connection: joining any network succeeds, and the firmware's own lwIP code gets DHCP, DNS and the internet, with nothing to set up. The [Wi-Fi example](examples/wifi) joins, fetches a web page for the ST to print, and serves one of its own.
+
 You can also load a `.mdfw` into Hatari yourself, with `--md-firmware myapp.mdfw` or by giving it as the last argument, just like a `.prg`.
 
 The [developer guide](docs/GUIDE.md) has all the details, and the [ROTT Accelerator](https://github.com/neilrackett/atarist-rott/tree/atarist/sidecart) is a full working example.
@@ -62,7 +66,7 @@ The repo includes a skill for AI coding agents ([skills/emumd/SKILL.md](skills/e
 ## Known limitations
 
 - EmuMD builds your firmware from source, so it can't run `.uf2` files.
-- Anything below the Pico SDK (PIO, DMA, Wi-Fi, USB, pins) isn't emulated, so code that relies on it needs to be left out or given a stand-in.
+- Anything below the Pico SDK (PIO, DMA, USB, pins) isn't emulated, so code that relies on it needs to be left out or given a stand-in. Wi-Fi goes through your computer's network, so the radio itself (signal, speed) still needs a real Pico W.
 - The emulated Multi-device is infinitely fast, so timing and performance still need testing on real hardware.
 - It's been tested on macOS and Linux (Ubuntu 24.04), and should work in WSL2 on Windows, but it doesn't run on Windows itself.
 

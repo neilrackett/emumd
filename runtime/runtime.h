@@ -29,6 +29,14 @@ void mdfw_runtime_flash_power_off(void);
 void mdfw_runtime_fatfs_reset(void);
 void mdfw_runtime_multicore_stop(void);
 
+/* Wi-Fi (runtime/wifi, in a firmware built with it; no-ops otherwise):
+ * background work on the emulator's thread, holding a fast-forwarding
+ * emulator back to the network's pace (once a frame), and switching the
+ * chip off. */
+void mdfw_runtime_async_turn(void);
+void mdfw_runtime_wifi_pace(uint64_t now_us);
+void mdfw_runtime_wifi_power_off(void);
+
 #include <stddef.h>
 void *mdfw_hostdir_open(const char *path);
 void mdfw_hostdir_close(void *d);

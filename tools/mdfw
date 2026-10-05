@@ -49,6 +49,13 @@ DEFAULT_TOS = os.path.join(CACHE, "emutos-256k-1.4", "etos256uk.img")
 # as .emumd-stamp, so a Hatari older than this EmuMD is spotted.
 HATARI_INPUTS = ["hatari/hatari-multidevice.patch", "hatari/multidevice.c",
                  "hatari/multidevice.h", "include/emumd_plugin.h"]
+# [wifi]'s lwIP when mdfw.ini does not name one: the Pico SDK's version,
+# downloaded once.
+LWIP_VERSION = "2.2.1"
+LWIP_GIT = "https://github.com/lwip-tcpip/lwip.git"
+WIFI_ARCHES = {"poll": "PICO_CYW43_ARCH_POLL=1",
+               "background": "PICO_CYW43_ARCH_THREADSAFE_BACKGROUND=1",
+               "threadsafe_background": "PICO_CYW43_ARCH_THREADSAFE_BACKGROUND=1"}
 
 
 def fail(msg):
@@ -85,6 +92,14 @@ class Project:
         self.cflags = shlex.split(self.get("compile", "cflags") or "-O2")
         self.cxxflags = shlex.split(self.get("compile", "cxxflags"))
         self.ldflags = shlex.split(self.get("compile", "ldflags") or "")
+        # [wifi]: the Pico W's Wi-Fi, through this computer's network.
+        self.wifi = cp.has_section("wifi")
+        self.lwip = self.path(self.get("wifi", "lwip")) if self.get("wifi", "lwip") else None
+        self.lwip_apps = self.lines("wifi", "apps")
+        self.wifi_arch = self.get("wifi", "arch") or "poll"
+        if self.wifi and self.wifi_arch not in WIFI_ARCHES:
+            fail("%s: [wifi] arch = poll or background" % os.path.basename(self.ini))
+        self.lwip_dir = None  # where lwIP is, once build() knows
 
     def get(self, section, key):
         return self.cp.get(section, key, fallback="").strip()
@@ -131,9 +146,12 @@ def compile_flags(proj):
              "-Wno-unused-function", "-Wno-missing-braces"] + proj.cflags
     # Your shims, then the runtime's (they replace the Pico SDK, FatFs and
     # the templates' debug.h, even where your include folders have their
-    # hardware versions), then your include folders.
-    for inc in (proj.shims + [os.path.join(RUNTIME, "shim"), os.path.join(ROOT, "include")]
-                + proj.includes + [RUNTIME]):
+    # hardware versions), then your include folders (one has your
+    # lwipopts.h, for Wi-Fi), then lwIP's.
+    wifi_shim = [os.path.join(RUNTIME, "wifi", "shim")] if proj.wifi else []
+    lwip_inc = [os.path.join(proj.lwip_dir, "src", "include")] if proj.wifi else []
+    for inc in (proj.shims + [os.path.join(RUNTIME, "shim")] + wifi_shim
+                + [os.path.join(ROOT, "include")] + proj.includes + lwip_inc + [RUNTIME]):
         flags.append("-I" + inc)
     flags.append('-DMDFW_NAME="%s"' % proj.name.replace('"', '\\"'))
     if proj.version:
@@ -141,6 +159,12 @@ def compile_flags(proj):
     # As the Pico SDK's host platform has them: built with the SDK, not
     # for the RP2040 itself.
     flags += ["-DEMUMD=1", "-DPICO_BUILD=1", "-DPICO_ON_DEVICE=0"]
+    if proj.wifi:
+        # As a Pico W build has them: its board's pins, cyw43_arch on lwIP.
+        flags += ["-DCYW43_WL_GPIO_LED_PIN=0", "-DCYW43_WL_GPIO_SMPS_PIN=1",
+                  "-DCYW43_WL_GPIO_VBUS_PIN=2", "-DPICO_CYW43_SUPPORTED=1",
+                  "-DCYW43_LWIP=1", "-DLIB_PICO_CYW43_ARCH=1",
+                  "-D" + WIFI_ARCHES[proj.wifi_arch]]
     for d in proj.defines:
         flags.append("-D" + d)
     return flags
@@ -152,11 +176,76 @@ def std_flags(proj, src):
     return ["-std=gnu11"]
 
 
+def source_base(proj, src):
+    """(folder its name is relative to, build subfolder) for a source."""
+    if src.startswith(RUNTIME + os.sep):
+        return ROOT, "runtime"
+    if proj.lwip_dir and src.startswith(proj.lwip_dir + os.sep):
+        return os.path.dirname(proj.lwip_dir), "lwip"
+    return proj.dir, "src"
+
+
 def object_for(proj, src):
-    rel = os.path.relpath(src, ROOT if src.startswith(RUNTIME + os.sep) else proj.dir)
-    rel = rel.replace("..", "_up").replace(os.sep, "__")
-    sub = "runtime" if src.startswith(RUNTIME + os.sep) else "src"
+    base, sub = source_base(proj, src)
+    rel = os.path.relpath(src, base).replace("..", "_up").replace(os.sep, "__")
     return os.path.join(proj.build_dir, sub, os.path.splitext(rel)[0] + ".o")
+
+
+def lwip_source(proj):
+    """The lwIP that [wifi] builds: mdfw.ini's, or the Pico SDK's version,
+    downloaded once."""
+    d = proj.lwip
+    if not d:
+        d = os.path.join(CACHE, "lwip-" + LWIP_VERSION)
+        if not os.path.isdir(d):
+            print("  Downloading lwIP %s" % LWIP_VERSION)
+            tmp = d + ".part"
+            shutil.rmtree(tmp, ignore_errors=True)
+            os.makedirs(CACHE, exist_ok=True)
+            tag = "STABLE-%s_RELEASE" % LWIP_VERSION.replace(".", "_")
+            r = subprocess.run(["git", "-c", "advice.detachedHead=false", "clone", "-q",
+                                "--depth", "1", "--branch", tag, LWIP_GIT, tmp],
+                               capture_output=True, text=True)
+            if r.returncode:
+                shutil.rmtree(tmp, ignore_errors=True)
+                sys.stderr.write(r.stderr)
+                fail("could not download lwIP from %s" % LWIP_GIT)
+            os.rename(tmp, d)
+    if not os.path.isfile(os.path.join(d, "src", "include", "lwip", "init.h")):
+        fail("[wifi] lwip = %s is not lwIP (no src/include/lwip/init.h)" % d)
+    return d
+
+
+def lwip_sources(proj):
+    """lwIP's core, IPv4 and IPv6, Ethernet, and the apps mdfw.ini asks for."""
+    src = os.path.join(proj.lwip_dir, "src")
+    files = []
+    for pat in ("core/*.c", "core/ipv4/*.c", "core/ipv6/*.c", "netif/ethernet.c", "api/err.c"):
+        files += sorted(glob.glob(os.path.join(src, pat)))
+    for pat in proj.lwip_apps:
+        hits = sorted(glob.glob(os.path.join(src, "apps", pat)))
+        if not hits:
+            fail("[wifi] apps: nothing matches %r in %s" % (pat, os.path.join(src, "apps")))
+        files += [h for h in hits if h not in files]
+    return files
+
+
+def slirp_flags():
+    """(cflags, libs) for libslirp, which [wifi] needs."""
+    out = []
+    for what in ("--cflags", "--libs"):
+        try:
+            r = subprocess.run(["pkg-config", what, "slirp"], capture_output=True, text=True)
+        except FileNotFoundError:
+            r = None
+        if not r or r.returncode:
+            if r:
+                sys.stderr.write(r.stderr)
+            fail("Wi-Fi needs libslirp and pkg-config:\n"
+                 "  macOS:  brew install libslirp pkg-config\n"
+                 "  Linux:  sudo apt install libslirp-dev libglib2.0-dev pkg-config")
+        out.append(shlex.split(r.stdout))
+    return out
 
 
 def out_of_date(obj, src):
@@ -184,13 +273,21 @@ def build(proj, verbose=False, jobs=None, clean=False):
     srcs = proj.sources + runtime_srcs
     if not proj.sources:
         fail("%s lists no sources" % os.path.basename(proj.ini))
+    # Wi-Fi: the runtime's chip, lwIP, and libslirp for the network (only
+    # net.c needs its headers).
+    net_c = os.path.join(RUNTIME, "wifi", "net.c")
+    net_cflags, net_libs = [], []
+    if proj.wifi:
+        proj.lwip_dir = lwip_source(proj)
+        net_cflags, net_libs = slirp_flags()
+        srcs += sorted(glob.glob(os.path.join(RUNTIME, "wifi", "*.c"))) + lwip_sources(proj)
     flags = compile_flags(proj)
     os.makedirs(proj.build_dir, exist_ok=True)
 
     # Rebuild everything when the flags change.
     stamp = os.path.join(proj.build_dir, "flags")
-    digest = hashlib.sha1(" ".join(compiler() + compiler(True) + flags + proj.cxxflags)
-                          .encode()).hexdigest()
+    digest = hashlib.sha1(" ".join(compiler() + compiler(True) + flags + proj.cxxflags
+                                   + net_cflags + net_libs).encode()).hexdigest()
     old = open(stamp).read() if os.path.exists(stamp) else ""
     force = clean or old != digest
 
@@ -204,22 +301,28 @@ def build(proj, verbose=False, jobs=None, clean=False):
         src, obj = item
         os.makedirs(os.path.dirname(obj), exist_ok=True)
         cmd = (compiler(is_cxx(src)) + std_flags(proj, src) + flags
+               + (net_cflags if src == net_c else [])
                + ["-MMD", "-MP", "-c", src, "-o", obj])
         r = subprocess.run(cmd, capture_output=True, text=True)
         return src, cmd, r
 
-    failed = False
+    failed = wants_wifi = False
     with concurrent.futures.ThreadPoolExecutor(jobs or os.cpu_count() or 4) as pool:
         for src, cmd, r in pool.map(cc, work):
-            print("  CC   %s" % os.path.relpath(
-                src, ROOT if src.startswith(RUNTIME + os.sep) else proj.dir))
+            print("  CC   %s" % os.path.relpath(src, source_base(proj, src)[0]))
             if verbose:
                 print("       " + " ".join(shlex.quote(c) for c in cmd))
             if r.stdout or r.stderr:
                 sys.stderr.write(r.stdout + r.stderr)
             if r.returncode:
                 failed = True
+                wants_wifi |= any(h in r.stderr for h in (
+                    "cyw43_arch.h", "cyw43.h", "lwip/", "lwipopts.h", "async_context"))
     if failed:
+        if wants_wifi and not proj.wifi:
+            sys.stderr.write("\nmdfw: that looks like Wi-Fi code: add [wifi] to %s (see EmuMD's\n"
+                             "docs/GUIDE.md, Wi-Fi), or leave the network code out.\n"
+                             % os.path.basename(proj.ini))
         fail("compile failed")
     with open(stamp, "w") as f:
         f.write(digest)
@@ -233,7 +336,8 @@ def build(proj, verbose=False, jobs=None, clean=False):
     os.makedirs(os.path.dirname(proj.output), exist_ok=True)
     # The C++ driver links in its runtime library when there is C++.
     link = (compiler(any(is_cxx(s) for s in srcs))
-            + ["-shared", "-o", proj.output] + objs + proj.ldflags + ["-lpthread"])
+            + ["-shared", "-o", proj.output] + objs + proj.ldflags + net_libs
+            + ["-lpthread"])
     if platform.system() == "Linux":
         # Keep the firmware's symbols to itself, and report missing ones now.
         link += ["-Wl,-Bsymbolic", "-Wl,-z,defs"]
@@ -305,6 +409,13 @@ defines =
 ;   RELEASE_VERSION="emu"
 cflags = -O2
 ; cxxflags =           ; C++ only (.cpp and .cc sources)
+
+; The Pico W's Wi-Fi, through this computer's network (needs libslirp).
+; Your lwipopts.h has to be in an include folder above.
+; [wifi]
+; lwip = pico-sdk/lib/lwip   ; default: lwIP 2.2.1, downloaded once
+; apps = http/http_client.c  ; lwIP apps you use, from its src/apps
+; arch = poll          ; or background (..._lwip_threadsafe_background)
 
 [run]
 ; Defaults for mdfw run.

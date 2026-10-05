@@ -287,10 +287,16 @@ static bool s_in_loop;
 static bool s_reboot_pending;
 static void reboot_now(void);
 
+/* Replaced by runtime/wifi in a firmware built with Wi-Fi. */
+__attribute__((weak)) void mdfw_runtime_async_turn(void) {}
+__attribute__((weak)) void mdfw_runtime_wifi_pace(uint64_t now_us) { (void)now_us; }
+__attribute__((weak)) void mdfw_runtime_wifi_power_off(void) {}
+
 static void run_main_loop(void) {
   if (!s_on || s_in_loop) return;
   s_in_loop = true;
   mdfw_runtime_run_timers(mdfw_time_us());
+  mdfw_runtime_async_turn();
   if (mdfw_app.poll) {
     for (int i = 0;
          i < MAX_POLLS_PER_TURN && !s_reboot_pending && mdfw_app.poll(); i++) {
@@ -375,6 +381,7 @@ static void plugin_power_off(void) {
   s_on = false;
   stop_main();
   mdfw_runtime_multicore_stop();
+  mdfw_runtime_wifi_power_off();
   mdfw_runtime_timers_reset();
   mdfw_runtime_fatfs_reset();
   mdfw_runtime_flash_power_off();
@@ -410,6 +417,7 @@ static void plugin_rom3_read(uint32_t offset, uint64_t now_us) {
 static void plugin_tick(uint64_t now_us) {
   set_host_time(now_us);
   run_main_loop();
+  if (s_on) mdfw_runtime_wifi_pace(now_us);
 }
 
 /* watchdog_reboot() and the like: power-cycle on the emulator's thread,

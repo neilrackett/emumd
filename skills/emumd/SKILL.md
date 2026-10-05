@@ -7,10 +7,10 @@ description: Build and run SidecarTridge Multi-device (RP2040) firmware in Hatar
 
 EmuMD builds a Multi-device firmware's own C sources for the host as a
 `.mdfw` (a shared library) and runs it in a patched Hatari, on the emulated
-cartridge port. The firmware's hardware set-up (PIO, DMA, clocks, SD driver,
-Wi-Fi) is left out; EmuMD's runtime stands in for the Pico SDK, flash,
-FatFs, core 1 and the ROM3/ROM4 bus. It is not RP2040 emulation: the `.uf2`
-is not used.
+cartridge port. The firmware's hardware set-up (PIO, DMA, clocks, SD driver)
+is left out; EmuMD's runtime stands in for the Pico SDK, flash, FatFs,
+core 1, the ROM3/ROM4 bus and, with `[wifi]`, the Pico W's Wi-Fi. It is
+not RP2040 emulation: the `.uf2` is not used.
 
 ## Find the tool
 
@@ -36,8 +36,9 @@ git submodule add https://github.com/neilrackett/emumd.git emu/emumd
    `emul.c`) to separate hardware set-up from logic. In `mdfw.ini`
    `[sources] files`, list the logic plus `emu/mdfw_app.c`. Leave out
    `main.c`, `romemul.c`, `commemul.c`, `sdcard.c`, `hw_config.c`,
-   `select.c`, `reset.c`, network, display, USB and settings code unless the
-   logic needs them.
+   `select.c`, `reset.c`, display, USB and settings code unless the logic
+   needs them. Network code stays if the firmware's Wi-Fi should work (see
+   Wi-Fi, below); otherwise leave it out.
 3. `[compile] include`: the firmware's include folders. EmuMD's
    stand-ins (Pico SDK headers, `ff.h`, `debug.h`) are searched before them,
    so hardware versions of those headers are skipped automatically.
@@ -57,6 +58,39 @@ git submodule add https://github.com/neilrackett/emumd.git emu/emumd
    - Name/version: `MDFW_NAME` / `MDFW_VERSION` come from `mdfw.ini`.
 5. `mdfw build`, then fix what it reports (next section) until it links.
 6. Run it headlessly and look (below). Also `mdfw info build/<name>.mdfw`.
+
+## Wi-Fi (Pico W firmware)
+
+Add `[wifi]` to `mdfw.ini` and keep the firmware's network code
+(`network.c` and whatever uses lwIP) in `[sources]`; leave the Pico SDK's
+lwIP and cyw43-driver sources out. EmuMD builds lwIP (the firmware's
+copy with `lwip = pico-sdk/lib/lwip`, else 2.2.1, downloaded) with the
+firmware's `lwipopts.h`, which must be in an `[compile] include` folder
+(usually `rp/src`), and stands in for the chip, `cyw43_arch` and
+`async_context`. List the lwIP apps it uses (`apps = http/http_client.c`)
+and set `arch = background` if CMakeLists.txt links
+`pico_cyw43_arch_lwip_threadsafe_background` (default: poll). Needs
+libslirp (`brew install libslirp pkg-config`; `apt install libslirp-dev
+libglib2.0-dev pkg-config`).
+
+- Joining succeeds whatever the SSID and password, but template firmware
+  will not try without an SSID in its flash settings: in the glue's
+  `init`, `settings_put_string(gconfig_getContext(), PARAM_WIFI_SSID,
+  "EmuMD");` (after `gconfig_init`, before the network starts).
+- The device is 10.0.2.15; 10.0.2.2 is the host (`python3 -m http.server`
+  there is `http://10.0.2.2:8000/` to it); DNS is 10.0.2.3 and reaches the
+  internet. `-O wifi_forward=tcp:8080:80` lets the host connect in.
+- Network waits must happen on the firmware's own thread (`.main`): there,
+  `cyw43_arch_wait_for_work_until()` really waits for the network. On the
+  emulator's thread (`init`/`poll`) a wait jumps emulated time, so only
+  joining and DHCP complete there.
+- Test failure paths with `-O wifi=badauth` (or `nonet`, `fail`, `off`),
+  slow joins with `-O wifi_join_ms=5000`, and see traffic with
+  `-O wifi_pcap=out.pcap`.
+- The template's `network.c` uses GCC nested functions in
+  `network_scan()`, which clang rejects: move them out as static functions
+  (they use only globals).
+- Example: `<emumd>/examples/wifi`; `make test-wifi` in EmuMD tests it.
 
 ## Fixing build errors
 

@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "mdfw.h"
+#include "pico/error.h"
 
 #ifdef __cplusplus
 extern "C" {
