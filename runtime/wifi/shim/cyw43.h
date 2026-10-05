@@ -13,6 +13,7 @@
 #define MDFW_SHIM_CYW43_H
 
 #include "cyw43_country.h"
+#include "lwip/dhcp.h"
 #include "lwip/netif.h"
 #include "pico.h"
 

@@ -12,7 +12,10 @@ flash, FatFs, the second core, and the PIO and DMA plumbing that serves the
 cartridge bus. So:
 
 - **It needs your source**, split so that the logic builds without the
-  hardware set-up (see [Preparing a firmware](#preparing-a-firmware)).
+  hardware set-up (see [Preparing a firmware](#preparing-a-firmware)). A
+  firmware on the SidecarTridge microfirmware template needs no splitting:
+  EmuMD stands in for the template's hardware layer, and its own `main()`
+  runs.
 - **The Multi-device is infinitely fast.** A command runs to completion
   the moment its last word arrives. Speed, timeouts and races between the
   two cores need real hardware.
@@ -138,9 +141,11 @@ write `hatari-event keypress 28` (an ST scancode) to the file.
 ```ini
 [firmware]
 name = My App                 ; also MDFW_NAME in your code
-version = v1.2.3              ; MDFW_VERSION
+version = v1.2.3              ; MDFW_VERSION (template: version.txt)
 ; output = build/my-app.mdfw  ; default: build/<name>.mdfw
 ; build_dir = build/mdfw
+template = sidecartridge      ; built on the SidecarTridge template: see below
+uuid = ...                    ; its app UUID (default: uuid.txt)
 
 [sources]
 files =                       ; paths and globs, relative to this file
@@ -192,6 +197,65 @@ structures kept in flash or shared memory are laid out as on the
 device.
 
 ## Preparing a firmware
+
+### A firmware on the SidecarTridge template
+
+A firmware built on the [SidecarTridge microfirmware
+template](https://github.com/sidecartridge/md-microfirmware-template) (a
+`uuid.txt`, and `rp/src` with `main.c`, `romemul.c`, `gconfig.c`...) runs
+its own `main()` in EmuMD, unchanged, with EmuMD standing in for the
+template's hardware layer. `mdfw init` recognises one and writes an
+`mdfw.ini` with `template = sidecartridge`, and no glue file:
+
+```ini
+[firmware]
+name = MD/JS
+template = sidecartridge      ; the version and app UUID: version.txt, uuid.txt
+
+[sources]
+files =
+    rp/src/*.c
+    rp/src/settings/settings.c
+
+[compile]
+include =
+    rp/src
+    rp/src/include
+    rp/src/settings
+```
+
+What EmuMD stands in for:
+
+- **The template's hardware sources**: `romemul.c`, `commemul.c`,
+  `select.c`, `hw_config.c` and `sdcard.c` are left out of `[sources]`.
+  ROM3 reads reach the firmware as the PIO and DMA would deliver them,
+  through commemul or, in the older template (`init_romemul()` with
+  callbacks), the lookup DMA channel's register and its interrupt handler.
+  `reset.h` loses its ARM code.
+- **The memory map**: `memmap_rp.ld`'s symbols are real ones, at the
+  Booster's offsets in EmuMD's flash (`_config_flash_start` is 0x1E0000
+  in, and so on), and `__rom_in_ram_start__` is ROM4.
+- **The SELECT button**, which is never pressed.
+- **The Booster**: on blank flash, EmuMD does what its first run would
+  (this app boots, and has the first settings sector), and gives a Wi-Fi
+  firmware a network name to join. A jump to the Booster stops the
+  firmware, as EmuMD does not run it.
+- **The template's defines**: `CURRENT_APP_UUID_KEY`, `RELEASE_VERSION`
+  and the rest of what its `CMakeLists.txt` defines (`_DEBUG=1`, so its
+  debug code runs; `DPRINTF` goes to the log with `-V`), unless your
+  `defines` give them. Your firmware's own defines still go in `defines`.
+
+What you may still have to change in your code: pointers kept in 32-bit
+integers (see below), GCC's nested functions, which clang (macOS's `cc`)
+rejects (the template's `network.c` has some in `network_scan()`: move
+them out as static functions), and ARM assembly behind
+`defined(__ARM_ARCH)`, which is true on Apple silicon too
+(`defined(__arm__)` is the 32-bit RP2040's). A glue file's `mdfw_app`,
+if you write one, replaces EmuMD's.
+
+[MD/JS](https://github.com/neilrackett/md-js) is built this way.
+
+### Any other firmware
 
 A SidecarTridge firmware's `main()` sets up the hardware (clocks, PIO,
 DMA, the SD card), copies its cartridge image into ROM4, then loops. For
@@ -300,9 +364,12 @@ What stands in for what:
 | Hardware divider | C division, with the divider's results for division by zero |
 | `DPRINTF` | Hatari's log, with `--md-verbose on` |
 | `watchdog_reboot` | The firmware is powered off and on; `watchdog_hw->scratch[]` survives that, and is cleared by a cold reset |
+| DMA | Memory-to-memory transfers happen at once (byte swapping and all); ones paced by the PIO or another peripheral do not. `dma_claim_unused_channel(false)` says none is free, so a caller with a CPU path takes it |
+| Linker-script regions (`memmap_rp.ld`) | Real symbols at the SidecarTridge Booster's offsets in flash, and `__rom_in_ram_start__` at ROM4 |
 | Wi-Fi (CYW43), `cyw43_arch`, `async_context` | With `[wifi]`: any network can be joined, and the chip's frames go to your computer's network (see [Wi-Fi](#wi-fi)) |
 | Board ID, `get_rand_32()` & co. | A fixed ID (`--md-option board_id=` for another); your computer's random numbers |
-| GPIO, IRQ set-up, clocks, DMA, PIO headers | Accepted and ignored |
+| GPIO | Pins read high (a template firmware's SELECT, low); writes go nowhere |
+| IRQ set-up, clocks, voltage, PIO headers | Accepted and ignored |
 
 The firmware's `poll` runs on Hatari's thread whenever the ST reads the
 cartridge, every 256th ROM4 read (so a firmware can make progress while
@@ -372,9 +439,11 @@ Things to know:
 
 - **Credentials.** A firmware on the SidecarTridge template keeps the
   network's name and password in its settings in flash, and does not try
-  to join without a name. Any will do, so set one in your glue file's
-  `init`: `settings_put_string(gconfig_getContext(), PARAM_WIFI_SSID,
-  "EmuMD");` (or keep a flash file with the settings, `-O flash=FILE`).
+  to join without a name. Any will do: with `template = sidecartridge`,
+  EmuMD sets "EmuMD" if there is none. Otherwise set one in your glue
+  file's `init`: `settings_put_string(gconfig_getContext(),
+  PARAM_WIFI_SSID, "EmuMD");` (or keep a flash file with the settings,
+  `-O flash=FILE`).
 - **Waiting for the network.** On the firmware's own threads (`main`, core
   1), waiting for work (`cyw43_arch_wait_for_work_until()`,
   `async_context_wait_for_work_ms()`) waits for the network as well as
@@ -399,6 +468,10 @@ Things to know:
   uses GCC's nested functions, which clang (macOS's `cc`) cannot build.
   They use only globals, so they can move out of the function unchanged,
   as static functions.
+- **A bigger page than TCP's window.** lwIP's HTTP client leaves calling
+  `altcp_recved()` to a `recv_fn` you give it: without that, a body
+  bigger than `TCP_WND` stalls until the client times out, on the Pico W
+  as here.
 
 `examples/wifi` is a small firmware that joins, then fetches a web page
 whenever the ST asks and puts it in ROM4 for the ST to print, and serves a

@@ -11,6 +11,9 @@
 
 #include <stdbool.h>
 
+/* memory.c: ROM4 (the first MDFW_ROM4_WORDS), then ROM3's 64 KB. */
+extern uint16_t mdfw_rom_in_ram[2 * 0x8000];
+
 void mdfw_runtime_sleep(uint64_t us);
 void mdfw_runtime_sleep_until(uint64_t target_us);
 void mdfw_runtime_reboot(void);

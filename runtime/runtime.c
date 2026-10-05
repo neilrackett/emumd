@@ -28,7 +28,8 @@
 static const emumd_host_t *s_host;
 static bool s_on;
 
-static uint16_t s_rom4[MDFW_ROM4_WORDS] __attribute__((aligned(8)));
+/* ROM4: the start of the RAM the cartridge is served from (memory.c). */
+#define s_rom4 mdfw_rom_in_ram
 
 /* Written by the emulator's thread only, read by any: head is published
  * after the sample it covers, tail after the sample it frees. */
@@ -352,7 +353,7 @@ static int power_on(const emumd_host_t *host, uint64_t now_us, bool cold) {
   while (n > 1 && s_sd_root[n - 1] == '/') s_sd_root[--n] = 0;
 
   set_host_time(now_us);
-  memset(s_rom4, 0, sizeof(s_rom4));
+  memset(mdfw_rom_in_ram, 0, sizeof(mdfw_rom_in_ram));
   s_ring_head = s_ring_tail = s_ring_dropped = 0;
   s_rom3_irq = NULL;
   mdfw_runtime_watchdog_power_on(cold);

@@ -53,6 +53,8 @@ HATARI_INPUTS = ["hatari/hatari-multidevice.patch", "hatari/multidevice.c",
 # downloaded once.
 LWIP_VERSION = "2.2.1"
 LWIP_GIT = "https://github.com/lwip-tcpip/lwip.git"
+# template = sidecartridge: EmuMD stands in for these, so they are left out.
+TEMPLATE_HARDWARE = ("romemul.c", "commemul.c", "hw_config.c", "sdcard.c", "select.c")
 WIFI_ARCHES = {"poll": "PICO_CYW43_ARCH_POLL=1",
                "background": "PICO_CYW43_ARCH_THREADSAFE_BACKGROUND=1",
                "threadsafe_background": "PICO_CYW43_ARCH_THREADSAFE_BACKGROUND=1"}
@@ -80,12 +82,25 @@ class Project:
         self.cp = cp
         self.name = self.get("firmware", "name") or os.path.basename(self.dir)
         self.version = self.get("firmware", "version")
+        # template = sidecartridge: built on the SidecarTridge microfirmware
+        # template, whose own main() runs (runtime/template).
+        self.template = self.get("firmware", "template")
+        if self.template not in ("", "sidecartridge"):
+            fail("%s: [firmware] template = sidecartridge, or nothing"
+                 % os.path.basename(self.ini))
+        self.uuid = self.get("firmware", "uuid") or self.read_text("uuid.txt")
+        if self.template:
+            self.version = self.version or self.read_text("version.txt")
+            if not self.uuid:
+                fail("%s: template = sidecartridge needs the app's UUID (uuid = ..., "
+                     "or a uuid.txt)" % os.path.basename(self.ini))
         slug = "".join(c if c.isalnum() or c in "-_." else "-" for c in self.name.lower())
         self.output = self.path(self.get("firmware", "output") or "build/%s.mdfw" % slug)
         self.build_dir = self.path(self.get("firmware", "build_dir") or "build/mdfw")
         self.sources = self.globs(self.lines("sources", "files"))
         excluded = set(self.globs(self.lines("sources", "exclude"), must_match=False))
-        self.sources = [s for s in self.sources if s not in excluded]
+        self.sources = [s for s in self.sources if s not in excluded
+                        and not (self.template and os.path.basename(s) in TEMPLATE_HARDWARE)]
         self.shims = [self.path(p) for p in self.lines("compile", "shims")]
         self.includes = [self.path(p) for p in self.lines("compile", "include")]
         self.defines = self.lines("compile", "defines")
@@ -103,6 +118,14 @@ class Project:
 
     def get(self, section, key):
         return self.cp.get(section, key, fallback="").strip()
+
+    def read_text(self, name):
+        """A one-line file next to mdfw.ini (the template's uuid.txt), or ""."""
+        try:
+            with open(os.path.join(self.dir, name)) as f:
+                return f.read().strip()
+        except OSError:
+            return ""
 
     def lines(self, section, key):
         return [l.strip() for l in self.get(section, key).splitlines() if l.strip()]
@@ -148,11 +171,14 @@ def compile_flags(proj):
     # the templates' debug.h, even where your include folders have their
     # hardware versions), then your include folders (one has your
     # lwipopts.h, for Wi-Fi), then lwIP's.
+    template_shim = [os.path.join(RUNTIME, "template", "shim")] if proj.template else []
     wifi_shim = [os.path.join(RUNTIME, "wifi", "shim")] if proj.wifi else []
     lwip_inc = [os.path.join(proj.lwip_dir, "src", "include")] if proj.wifi else []
-    for inc in (proj.shims + [os.path.join(RUNTIME, "shim")] + wifi_shim
+    for inc in (proj.shims + [os.path.join(RUNTIME, "shim")] + template_shim + wifi_shim
                 + [os.path.join(ROOT, "include")] + proj.includes + lwip_inc + [RUNTIME]):
         flags.append("-I" + inc)
+    if proj.template:
+        flags += ["-include", os.path.join(RUNTIME, "template", "shim", "emumd_template.h")]
     flags.append('-DMDFW_NAME="%s"' % proj.name.replace('"', '\\"'))
     if proj.version:
         flags.append('-DMDFW_VERSION="%s"' % proj.version.replace('"', '\\"'))
@@ -165,9 +191,33 @@ def compile_flags(proj):
                   "-DCYW43_WL_GPIO_VBUS_PIN=2", "-DPICO_CYW43_SUPPORTED=1",
                   "-DCYW43_LWIP=1", "-DLIB_PICO_CYW43_ARCH=1",
                   "-D" + WIFI_ARCHES[proj.wifi_arch]]
+    if proj.template:
+        flags += ["-D" + d for d in template_defines(proj)]
     for d in proj.defines:
         flags.append("-D" + d)
     return flags
+
+
+def template_defines(proj):
+    """What the template's CMakeLists.txt defines, unless mdfw.ini does."""
+    mine = {d.split("=", 1)[0] for d in proj.defines}
+    callbacks = False
+    for inc in proj.shims + proj.includes:
+        try:
+            with open(os.path.join(inc, "romemul.h")) as f:
+                callbacks = "IRQInterceptionCallback requestCallback" in f.read()
+            break
+        except OSError:
+            pass
+    defaults = [
+        'CURRENT_APP_UUID_KEY="%s"' % proj.uuid,
+        "RELEASE_VERSION=" + ("MDFW_VERSION" if proj.version else '"emumd"'),
+        'RELEASE_TYPE="emumd"', "RELEASE_DATE=__DATE__", 'LATEST_RELEASE_URL=""',
+        "_DEBUG=1", "DISPLAY_ATARIST", "BOARD_TYPE_PICO_W=1", "BOARD_TYPE_PICO=0",
+        "BOARD_TYPE_CUSTOM16MB=0", "PICO_FLASH_SPI_CLKDIV=2",
+        "PICO_FLASH_SIZE_BYTES=(2*1024*1024)",
+        "EMUMD_ROMEMUL_CALLBACKS=%d" % callbacks]
+    return [d for d in defaults if d.split("=", 1)[0] not in mine]
 
 
 def std_flags(proj, src):
@@ -277,6 +327,8 @@ def build(proj, verbose=False, jobs=None, clean=False):
     # net.c needs its headers).
     net_c = os.path.join(RUNTIME, "wifi", "net.c")
     net_cflags, net_libs = [], []
+    if proj.template:
+        srcs += sorted(glob.glob(os.path.join(RUNTIME, "template", "*.c")))
     if proj.wifi:
         proj.lwip_dir = lwip_source(proj)
         net_cflags, net_libs = slirp_flags()
@@ -290,6 +342,8 @@ def build(proj, verbose=False, jobs=None, clean=False):
                                    + net_cflags + net_libs).encode()).hexdigest()
     old = open(stamp).read() if os.path.exists(stamp) else ""
     force = clean or old != digest
+    if force and os.path.exists(stamp):
+        os.remove(stamp)  # until these flags have built everything
 
     work = []
     for src in srcs:
@@ -337,7 +391,7 @@ def build(proj, verbose=False, jobs=None, clean=False):
     # The C++ driver links in its runtime library when there is C++.
     link = (compiler(any(is_cxx(s) for s in srcs))
             + ["-shared", "-o", proj.output] + objs + proj.ldflags + net_libs
-            + ["-lpthread"])
+            + ["-lm", "-lpthread"])  # as the Pico SDK links its maths library
     if platform.system() == "Linux":
         # Keep the firmware's symbols to itself, and report missing ones now.
         link += ["-Wl,-Bsymbolic", "-Wl,-z,defs"]
@@ -429,6 +483,51 @@ cflags = -O2
 ; hatari_args =
 """
 
+# For a firmware on the SidecarTridge microfirmware template (uuid.txt,
+# rp/src/main.c): its own main() runs, so there is no glue file.
+SIDECARTRIDGE_INI_TEMPLATE = """\
+; mdfw.ini - how EmuMD builds this firmware for the host (mdfw build).
+; Paths are relative to this file; globs such as src/*.c are fine.
+
+[firmware]
+name = {name}
+; output = build/{slug}.mdfw
+; Built on the SidecarTridge microfirmware template: its own main() runs,
+; with EmuMD standing in for the template's hardware (romemul.c,
+; commemul.c, select.c, hw_config.c and sdcard.c are left out) and the
+; Booster. The version and app UUID come from version.txt and uuid.txt.
+template = sidecartridge
+
+[sources]
+; The firmware, as rp/src/CMakeLists.txt lists it (and any libraries).
+files =
+    rp/src/*.c
+    rp/src/settings/settings.c
+exclude =
+
+[compile]
+; Your own stand-ins for hardware-only headers, searched first.
+shims =
+include =
+    rp/src
+    rp/src/include
+    rp/src/settings
+; What rp/src/CMakeLists.txt defines, besides the template's usual ones.
+defines =
+cflags = -O2
+{wifi}
+[run]
+machine = ste
+"""
+
+WIFI_INI_SECTION = """
+; The Pico W's Wi-Fi, through this computer's network (needs libslirp).
+[wifi]
+lwip = pico-sdk/lib/lwip
+; apps = http/http_client.c  ; lwIP apps you use, from its src/apps
+arch = {arch}
+"""
+
 APP_TEMPLATE = """\
 /*
  * mdfw_app.c - {name} for EmuMD: what the firmware's main() does
@@ -473,7 +572,16 @@ def cmd_init(args):
     ini = os.path.join(d, "mdfw.ini")
     app = os.path.join(d, "emu", "mdfw_app.c")
     fill = lambda t: t.replace("{name}", name).replace("{slug}", slug)
-    for path, text in ((ini, fill(INI_TEMPLATE)), (app, fill(APP_TEMPLATE))):
+    template = (os.path.isfile(os.path.join(d, "uuid.txt"))
+                and os.path.isfile(os.path.join(d, "rp", "src", "main.c")))
+    if template:
+        arch = template_wifi_arch(os.path.join(d, "rp", "src", "CMakeLists.txt"))
+        wifi = WIFI_INI_SECTION.replace("{arch}", arch) if arch else ""
+        files = [(ini, fill(SIDECARTRIDGE_INI_TEMPLATE).replace("{wifi}", wifi))]
+        print("  a SidecarTridge template firmware: its own main() runs")
+    else:
+        files = [(ini, fill(INI_TEMPLATE)), (app, fill(APP_TEMPLATE))]
+    for path, text in files:
         if os.path.exists(path):
             print("  kept %s (already there)" % os.path.relpath(path))
             continue
@@ -482,7 +590,9 @@ def cmd_init(args):
             f.write(text)
         made.append(path)
         print("  made %s" % os.path.relpath(path))
-    if made:
+    if made and template:
+        print("Next: check mdfw.ini against rp/src/CMakeLists.txt, then: mdfw build")
+    elif made:
         print("Next: list your sources in mdfw.ini, fill in emu/mdfw_app.c, then: mdfw build")
     root = git_root(d) or d
     if not (ROOT + os.sep).startswith(root + os.sep):
@@ -490,6 +600,19 @@ def cmd_init(args):
               "  git submodule add %s emu/emumd\n"
               "and then use emu/emumd/tools/mdfw." % (root, REPO_URL))
     print("For coding agents: mdfw skill install")
+
+
+def template_wifi_arch(cmakelists):
+    """poll or background, as the firmware links pico_cyw43_arch; or ""."""
+    try:
+        with open(cmakelists) as f:
+            lines = [l.split("#", 1)[0] for l in f]
+    except OSError:
+        return ""
+    text = " ".join(lines)
+    if "pico_cyw43_arch_lwip_threadsafe_background" in text:
+        return "background"
+    return "poll" if "pico_cyw43_arch_lwip_poll" in text else ""
 
 
 def git_root(path):

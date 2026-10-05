@@ -340,6 +340,17 @@ FRESULT f_stat(const TCHAR *path, FILINFO *fno) {
   return FR_OK;
 }
 
+FRESULT f_chmod(const TCHAR *path, BYTE attr, BYTE mask) {
+  char host[2048];
+  struct stat st;
+  FRESULT fr = host_path(path, host, sizeof(host), false);
+  if (fr != FR_OK) return fr;
+  if (stat(host, &st) != 0) return FR_NO_FILE;
+  if (!(mask & AM_RDO)) return FR_OK;
+  const mode_t mode = (attr & AM_RDO) ? (st.st_mode & ~(mode_t)0222) : (st.st_mode | S_IWUSR);
+  return chmod(host, mode & 07777) == 0 ? FR_OK : errno_result();
+}
+
 FRESULT f_mkdir(const TCHAR *path) {
   char host[2048];
   FRESULT fr = host_path(path, host, sizeof(host), true);

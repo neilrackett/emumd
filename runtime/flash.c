@@ -15,7 +15,7 @@
 #include "pico.h"
 #include "runtime.h"
 
-uint8_t mdfw_flash[MDFW_FLASH_BYTES] __attribute__((aligned(4096)));
+/* mdfw_flash itself is in memory.c, with the template's regions marked. */
 static bool s_flash_ready;
 
 static const char *flash_file(void) { return mdfw_option("flash"); }

@@ -34,6 +34,10 @@ void busy_wait_us_32(uint32_t us) { sleep_us(us); }
 void busy_wait_ms(uint32_t ms) { sleep_ms(ms); }
 void busy_wait_until(absolute_time_t t) { sleep_until(t); }
 
+/* What each GPIO reads (hardware/gpio.h): high, unless EmuMD says
+ * otherwise (a SidecarTridge template's SELECT button reads low). */
+uint32_t mdfw_gpio_inputs = 0xffffffffu;
+
 static uint32_t s_sys_hz = 125000000u;
 
 bool set_sys_clock_khz(uint32_t freq_khz, bool required) {

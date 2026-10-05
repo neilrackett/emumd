@@ -30,6 +30,27 @@ git submodule add https://github.com/neilrackett/emumd.git emu/emumd
 
 ## Porting a firmware
 
+If the firmware is on the SidecarTridge microfirmware template (a
+`uuid.txt`; `rp/src/main.c`, `romemul.c`, `gconfig.c`, `settings/`),
+`mdfw init` writes an `mdfw.ini` with `template = sidecartridge` and no
+glue: its own `main()` runs, and EmuMD stands in for `romemul.c`,
+`commemul.c`, `select.c`, `hw_config.c` and `sdcard.c` (left out
+automatically), the linker script's symbols, SELECT and the Booster's
+first-run set-up. Then:
+
+- Match `[sources]` and `[compile] defines` to `rp/src/CMakeLists.txt`
+  (libraries it adds, e.g. JerryScript's `jerry-core/**/*.c` with its
+  include folders and `JERRY_*` defines; the template's usual defines are
+  EmuMD's already).
+- `mdfw build` and fix what is left: pointers in 32-bit integers, GCC
+  nested functions (move them out as static functions; the template's
+  `network.c` has some), ARM assembly behind `defined(__ARM_ARCH)` (true on
+  Apple silicon: use `defined(__arm__)`).
+- A Wi-Fi firmware gets `[wifi]` (see Wi-Fi, below); its network name is
+  set for it.
+
+Otherwise:
+
 1. `mdfw init` in the firmware repository: writes `mdfw.ini` and
    `emu/mdfw_app.c`.
 2. Read the firmware's `main()` (and whatever it calls first, often
@@ -74,9 +95,10 @@ libslirp (`brew install libslirp pkg-config`; `apt install libslirp-dev
 libglib2.0-dev pkg-config`).
 
 - Joining succeeds whatever the SSID and password, but template firmware
-  will not try without an SSID in its flash settings: in the glue's
-  `init`, `settings_put_string(gconfig_getContext(), PARAM_WIFI_SSID,
-  "EmuMD");` (after `gconfig_init`, before the network starts).
+  will not try without an SSID in its flash settings. With `template =
+  sidecartridge` EmuMD sets one; with a glue file, in its `init`:
+  `settings_put_string(gconfig_getContext(), PARAM_WIFI_SSID, "EmuMD");`
+  (after `gconfig_init`, before the network starts).
 - The device is 10.0.2.15; 10.0.2.2 is the host (`python3 -m http.server`
   there is `http://10.0.2.2:8000/` to it); DNS is 10.0.2.3 and reaches the
   internet. `-O wifi_forward=tcp:8080:80` lets the host connect in.
@@ -105,6 +127,8 @@ libglib2.0-dev pkg-config`).
 | `cast to smaller integer type`, or flash/config reads wrong after `(uint32_t)&sym - XIP_BASE` | Pointers are 64-bit: do the arithmetic in `uintptr_t`. Pointers passed through the inter-core FIFO need another route (a slot, with the FIFO as the signal) |
 | `uint` undeclared (newlib's `sys/types.h` brings it on the RP2040) | `-include sys/types.h` in the prefix |
 | `section` attribute not valid (macOS) | The SDK's `__scratch_x("name")`-style macros, which the stand-ins empty; a custom one via a shim |
+| `function definition is not allowed here` | GCC nested functions: move them out as static functions (clang has none) |
+| `<inline asm>` errors on Apple silicon | ARM code behind `defined(__ARM_ARCH)`, which arm64 defines too: guard it with `defined(__arm__)` |
 | Settings or other structures in flash read back wrong | Should not happen: EmuMD builds with `-fshort-enums` like arm-none-eabi. Check for other layout assumptions (`sizeof(void *)`) |
 
 Defines go in `[compile] defines`, one per line (`RELEASE_VERSION=MDFW_VERSION`).

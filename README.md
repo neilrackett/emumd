@@ -48,7 +48,9 @@ emu/emumd/tools/mdfw build    # builds build/<name>.mdfw
 emu/emumd/tools/mdfw run      # runs it in Hatari
 ```
 
-In `mdfw.ini` you list the C files that make up your firmware's logic, leaving out anything that sets up hardware (PIO, DMA, clocks, the SD card driver), and `emu/mdfw_app.c` does what your `main()` does once the hardware is ready. `mdfw run --headless` runs it without a window and can save a screenshot, which is handy for automated tests, and `--record out.avi` records video and sound. In Hatari's window, Cmd+A (AltGr+A on Linux) starts and stops a recording, and Cmd+O or F12 opens its options.
+If your firmware is built on the [SidecarTridge microfirmware template](https://github.com/sidecartridge/md-microfirmware-template), that's usually it: `mdfw init` spots it, EmuMD stands in for the template's hardware layer (the cartridge bus, SELECT, the Booster's set-up), and your own `main()` runs unchanged, with no glue file. [MD/JS](https://github.com/neilrackett/md-js) is built this way.
+
+Otherwise, in `mdfw.ini` you list the C files that make up your firmware's logic, leaving out anything that sets up hardware (PIO, DMA, clocks, the SD card driver), and `emu/mdfw_app.c` does what your `main()` does once the hardware is ready. `mdfw run --headless` runs it without a window and can save a screenshot, which is handy for automated tests, and `--record out.avi` records video and sound. In Hatari's window, Cmd+A (AltGr+A on Linux) starts and stops a recording, and Cmd+O or F12 opens its options.
 
 If your firmware uses the Pico W's Wi-Fi, add a `[wifi]` section to `mdfw.ini` and it'll work too, through your computer's own network connection: joining any network succeeds, and the firmware's own lwIP code gets DHCP, DNS and the internet, with nothing to set up. The [Wi-Fi example](examples/wifi) joins, fetches a web page for the ST to print, and serves one of its own.
 

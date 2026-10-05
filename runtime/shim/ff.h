@@ -129,6 +129,8 @@ FRESULT f_mkdir(const TCHAR *path);
 FRESULT f_unlink(const TCHAR *path);
 FRESULT f_rename(const TCHAR *path_old, const TCHAR *path_new);
 FRESULT f_stat(const TCHAR *path, FILINFO *fno);
+/* Of the attributes, only AM_RDO means anything here: write permission. */
+FRESULT f_chmod(const TCHAR *path, BYTE attr, BYTE mask);
 FRESULT f_chdir(const TCHAR *path);
 FRESULT f_chdrive(const TCHAR *path);
 FRESULT f_getcwd(TCHAR *buff, UINT len);

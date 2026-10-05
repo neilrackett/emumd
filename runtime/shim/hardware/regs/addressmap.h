@@ -8,4 +8,6 @@
 #include "pico.h"
 #define XIP_BASE ((uintptr_t)mdfw_flash)
 #define XIP_NOCACHE_NOALLOC_BASE XIP_BASE
+/* The XIP streaming FIFO's (hardware/structs/xip_ctrl.h: never fed). */
+#define XIP_AUX_BASE 0x50400000u
 #endif

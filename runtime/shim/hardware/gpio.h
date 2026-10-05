@@ -1,10 +1,12 @@
 /* Copyright (C) 2026 Neil Rackett
  * SPDX-License-Identifier: GPL-3.0-or-later */
-/* Host stand-in for hardware/gpio.h: pins read high (inactive) and writes
- * go nowhere. The cartridge bus is not pins on the host (mdfw.h). */
+/* Host stand-in for hardware/gpio.h: pins read what mdfw_gpio_inputs
+ * says (high, inactive, unless EmuMD says otherwise) and writes go
+ * nowhere. The cartridge bus is not pins on the host (mdfw.h). */
 #ifndef MDFW_SHIM_HARDWARE_GPIO_H
 #define MDFW_SHIM_HARDWARE_GPIO_H
 #include "pico.h"
+extern uint32_t mdfw_gpio_inputs; /* bit n: what pin n reads (pico.c) */
 #define GPIO_IN false
 #define GPIO_OUT true
 enum gpio_function { GPIO_FUNC_XIP, GPIO_FUNC_SPI, GPIO_FUNC_UART, GPIO_FUNC_I2C,
@@ -31,8 +33,8 @@ static inline void gpio_put(uint g, bool v) { (void)g; (void)v; }
 static inline void gpio_put_masked(uint32_t m, uint32_t v) { (void)m; (void)v; }
 static inline void gpio_set_mask(uint32_t m) { (void)m; }
 static inline void gpio_clr_mask(uint32_t m) { (void)m; }
-static inline bool gpio_get(uint g) { (void)g; return true; }
-static inline uint32_t gpio_get_all(void) { return 0xffffffffu; }
+static inline bool gpio_get(uint g) { return (mdfw_gpio_inputs >> (g & 31u)) & 1u; }
+static inline uint32_t gpio_get_all(void) { return mdfw_gpio_inputs; }
 static inline void gpio_set_irq_enabled(uint g, uint32_t e, bool on) { (void)g; (void)e; (void)on; }
 /* The SDK's debug pins, which a firmware may leave in: nothing to toggle. */
 #define CU_REGISTER_DEBUG_PINS(...)
