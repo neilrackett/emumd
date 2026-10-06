@@ -175,7 +175,7 @@ arch = poll                   ; or background
 sd = sd                       ; the microSD card folder
 tos = /path/to/tos.img        ; default: EmuTOS 1.4 (UK)
 machine = megaste
-harddrive =                   ; a GEMDOS drive C: for the ST side's files
+harddrive =                   ; a GEMDOS drive C: for the ST side's files (made if missing)
 options =                     ; --md-option key=value, one per line
 hatari_args = --memsize 4
 ```

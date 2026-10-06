@@ -725,6 +725,7 @@ def cmd_run(args):
         cmd += ["--machine", machine]
     hd = setting(args.harddrive, "harddrive")
     if hd:
+        os.makedirs(as_path(hd), exist_ok=True)  # as sd: Hatari needs it there
         cmd += ["--harddrive", as_path(hd)]
     else:
         cmd += ["--harddrive", "none"]  # so the firmware's cartridge boots
