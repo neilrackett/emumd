@@ -510,6 +510,12 @@ pin the pointer to the corner, and later moves land at known positions.
 And `--run-vbls` (`mdfw run --frames`) quits as closing the window does,
 so a recording it ends is a finished file.
 
+On a GEMDOS drive (`--harddrive`), each program's current folder is its
+own, as it is in TOS: when a program ends, any change it made to it is
+undone. Hatari alone keeps one per drive, so after STinG (which changes
+to its own folder, from the AUTO folder) EmuTOS looked there for its
+accessories.
+
 EmuMD's Hatari is built without the macOS app bundle, so it has no menu
 bar: use its shortcuts instead. Cmd+A starts and stops recording video
 (an AVI with sound), Cmd+Y records sound only, and Cmd+O or F12 (fn+F12 on
