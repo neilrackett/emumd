@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * File: emumd_plugin.h
- * Description: The interface between an emulator (Hatari, patched by
- *              hatari/) and a SidecarTridge Multi-device firmware built
+ * Description: The interface between an emulator (EmuMD's fork of
+ *              Hatari) and a SidecarTridge Multi-device firmware built
  *              for the host as a .mdfw plugin (a shared library).
  *
  * The emulator loads the plugin, calls its entry point once, and from then
@@ -16,7 +16,8 @@
  * Multi-device is infinitely fast.
  *
  * GPL-2.0-or-later so that it can be built into Hatari. Both sides include
- * this same file; build-hatari.sh copies it into Hatari's sources.
+ * this same file: EmuMD's include/emumd_plugin.h, and its copy in the Hatari
+ * fork's src/includes, which build-hatari.sh checks are the same.
  */
 
 #ifndef EMUMD_PLUGIN_H

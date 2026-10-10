@@ -5,7 +5,7 @@
 
 A .mdfw is a firmware's own C sources, a small glue file and the
 EmuMD runtime, built for this computer as one shared library that
-the patched Hatari loads with --md-firmware (or as its last argument).
+EmuMD's Hatari loads with --md-firmware (or as its last argument).
 mdfw.ini in the firmware's repository says which sources to use.
 
   mdfw init [DIR]          add mdfw.ini and emu/mdfw_app.c to a firmware
@@ -37,18 +37,18 @@ PLUGIN_ABI = 1
 SKILL = os.path.join(ROOT, "skills", "emumd")
 REPO_URL = "https://github.com/neilrackett/emumd.git"
 
-# The patched Hatari is built once per user, not inside each project (where
+# EmuMD's Hatari is built once per user, not inside each project (where
 # EmuMD is typically a submodule); build-hatari.sh uses the same place.
 CACHE = os.environ.get("EMUMD_CACHE") or os.path.join(
     os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "emumd")
-HATARI_SRC = os.path.join(CACHE, "hatari")
+HATARI_SRC = os.path.join(CACHE, "hatari-fork")
 DEFAULT_HATARI = os.path.join(HATARI_SRC, "build", "src", "hatari")
 # Downloaded by build-hatari.sh too; mdfw run's TOS unless told otherwise.
 DEFAULT_TOS = os.path.join(CACHE, "emutos-256k-1.4", "etos256uk.img")
-# What the patched Hatari is built from: build-hatari.sh stores their SHA-1
-# as .emumd-stamp, so a Hatari older than this EmuMD is spotted.
-HATARI_INPUTS = ["hatari/hatari-multidevice.patch", "hatari/multidevice.c",
-                 "hatari/multidevice.h", "include/emumd_plugin.h"]
+# What EmuMD's Hatari is built from (the script names the fork's commit):
+# build-hatari.sh stores their SHA-1 as .emumd-stamp, so a Hatari older
+# than this EmuMD is spotted.
+HATARI_INPUTS = ["hatari/build-hatari.sh", "include/emumd_plugin.h"]
 # [wifi]'s lwIP when mdfw.ini does not name one: the Pico SDK's version,
 # downloaded once.
 LWIP_VERSION = "2.2.1"

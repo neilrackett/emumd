@@ -6,7 +6,7 @@ description: Build and run SidecarTridge Multi-device (RP2040) firmware in Hatar
 # EmuMD
 
 EmuMD builds a Multi-device firmware's own C sources for the host as a
-`.mdfw` (a shared library) and runs it in a patched Hatari, on the emulated
+`.mdfw` (a shared library) and runs it in EmuMD's Hatari, on the emulated
 cartridge port. The firmware's hardware set-up (PIO, DMA, clocks, SD driver)
 is left out; EmuMD's runtime stands in for the Pico SDK, flash, FatFs,
 core 1, the ROM3/ROM4 bus and, with `[wifi]`, the Pico W's Wi-Fi. It is
@@ -139,7 +139,7 @@ as C++17; `[compile] cxxflags` for C++-only flags.
 ## Running and checking
 
 ```sh
-mdfw hatari        # once: builds the patched Hatari into ~/.cache/emumd
+mdfw hatari        # once: builds EmuMD's Hatari into ~/.cache/emumd
                    # and downloads EmuTOS 1.4 alongside it
 mdfw run --headless --frames 400 --no-user-config \
          --sd sd --screenshot out.png --log run.log --timeout 300

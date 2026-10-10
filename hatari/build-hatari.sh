@@ -5,30 +5,45 @@
 #
 #   build-hatari.sh [hatari source folder]
 #
-# By default Hatari v2.6.1 is cloned into a per-user cache
-# ($EMUMD_CACHE, else ~/.cache/emumd/hatari), shared by every
-# project and kept out of EmuMD itself (often a submodule). The
-# patch is re-applied from clean whenever it changes; later runs just
-# rebuild. EmuTOS 1.4 (256k, every language) is downloaded alongside,
-# into the cache's emutos-256k-1.4 folder. Prints the path of the
-# hatari binary last.
+# EmuMD's fork of Hatari (Hatari 2.6.1 with Multi-device support, on
+# its emumd branch) is fetched at the commit below into a per-user cache
+# ($EMUMD_CACHE, else ~/.cache/emumd/hatari-fork), shared by every
+# project and kept out of EmuMD itself (often a submodule). It is checked
+# out again whenever that commit changes; later runs just rebuild.
+# (~/.cache/emumd/hatari is older EmuMDs' patched Hatari, left to them.)
+# EmuTOS 1.4 (256k, every language) is downloaded alongside, into the
+# cache's emutos-256k-1.4 folder. Prints the path of the hatari binary
+# last.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(dirname "$HERE")
 CACHE=${EMUMD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/emumd}
-SRC=${1:-$CACHE/hatari}
-HATARI_GIT=${HATARI_GIT:-https://framagit.org/hatari/hatari.git}
-HATARI_TAG=${HATARI_TAG:-v2.6.1}
+SRC=${1:-$CACHE/hatari-fork}
+HATARI_GIT=${HATARI_GIT:-https://github.com/neilrackett/hatari.git}
+# The fork's emumd branch, as this version of EmuMD was made for.
+HATARI_COMMIT=${HATARI_COMMIT:-4c580b57fe850f816e2444477be2436578374939}
 EMUTOS_VERSION=${EMUTOS_VERSION:-1.4}
 EMUTOS="$CACHE/emutos-256k-$EMUTOS_VERSION"
-PATCH="$HERE/hatari-multidevice.patch"
 
 sha1() { if command -v shasum >/dev/null; then shasum -a 1; else sha1sum; fi | cut -d' ' -f1; }
 
-if [ ! -d "$SRC" ]; then
-    mkdir -p "$(dirname "$SRC")"
-    git clone --depth 1 --branch "$HATARI_TAG" "$HATARI_GIT" "$SRC" >&2
+# Hatari's sources, at that commit.
+if [ ! -d "$SRC/.git" ]; then
+    mkdir -p "$SRC"
+    git -C "$SRC" init -q
+fi
+if [ "$(git -C "$SRC" rev-parse -q --verify 'HEAD^{commit}' || true)" != "$HATARI_COMMIT" ]; then
+    git -C "$SRC" fetch -q --depth 1 "$HATARI_GIT" "$HATARI_COMMIT" >&2
+    git -C "$SRC" checkout -q -f --detach FETCH_HEAD >&2
+    git -C "$SRC" clean -fdq -- src >&2
+fi
+
+# Both sides include emumd_plugin.h: Hatari's copy must be this one.
+if ! cmp -s "$ROOT/include/emumd_plugin.h" "$SRC/src/includes/emumd_plugin.h"; then
+    echo "build-hatari.sh: Hatari's src/includes/emumd_plugin.h differs from" \
+         "EmuMD's include/emumd_plugin.h; make them the same, in the fork too" >&2
+    exit 1
 fi
 
 # A free TOS to boot it with; unpacked aside first, so an interrupted
@@ -44,30 +59,6 @@ if [ ! -d "$EMUTOS" ]; then
     mv "$TMP/emutos-256k-$EMUTOS_VERSION" "$EMUTOS"
 fi
 
-# (Re)apply the patch to clean sources when it is new or has changed.
-PATCH_SUM=$(sha1 < "$PATCH")
-if [ "$(cat "$SRC/.emumd-patch" 2>/dev/null)" != "$PATCH_SUM" ]; then
-    if grep -q multidevice.h "$SRC/src/cpu/memory.c"; then
-        git -C "$SRC" checkout -- . >&2
-        git -C "$SRC" clean -fdq -- src >&2
-    fi
-    patch -d "$SRC" -p1 < "$PATCH" >&2
-    echo "$PATCH_SUM" > "$SRC/.emumd-patch"
-fi
-
-# Our own files: always refreshed, so changes here reach the build.
-cp "$HERE/multidevice.c" "$SRC/src/multidevice.c"
-cp "$HERE/multidevice.h" "$SRC/src/includes/multidevice.h"
-cp "$ROOT/include/emumd_plugin.h" "$SRC/src/includes/emumd_plugin.h"
-if ! grep -q multidevice.c "$SRC/src/CMakeLists.txt"; then
-    cat >> "$SRC/src/CMakeLists.txt" <<'CMAKE'
-
-# SidecarTridge Multi-device (EmuMD): loads .mdfw firmware plugins
-target_sources(${APP_NAME} PRIVATE multidevice.c)
-target_link_libraries(${APP_NAME} ${CMAKE_DL_LIBS})
-CMAKE
-fi
-
 ARCH_ARGS=()
 if [ "$(uname -s)" = "Darwin" ]; then
     ARCH_ARGS=(-DCMAKE_OSX_ARCHITECTURES="$(uname -m)")
@@ -77,7 +68,6 @@ cmake -S "$SRC" -B "$SRC/build" -DCMAKE_BUILD_TYPE=Release \
 cmake --build "$SRC/build" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >&2
 
 # What it was built from, for mdfw run to compare (same files, same order).
-cat "$PATCH" "$HERE/multidevice.c" "$HERE/multidevice.h" "$ROOT/include/emumd_plugin.h" \
-    | sha1 > "$SRC/.emumd-stamp"
+cat "$HERE/build-hatari.sh" "$ROOT/include/emumd_plugin.h" | sha1 > "$SRC/.emumd-stamp"
 echo "EmuTOS $EMUTOS_VERSION: $EMUTOS/etos256uk.img (and other languages)" >&2
 echo "$SRC/build/src/hatari"

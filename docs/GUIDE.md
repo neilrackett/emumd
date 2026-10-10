@@ -80,10 +80,10 @@ The submodule pins the EmuMD your firmware was tested with, so a
 clone (or CI, with `git submodule update --init`) builds the same `.mdfw`,
 and the agent skill matches it. EmuMD never writes inside its own
 folder when building your firmware: objects and the `.mdfw` go to your
-`build/`, and the patched Hatari is built once per user in
+`build/`, and EmuMD's Hatari is built once per user in
 `~/.cache/emumd` (or `$EMUMD_CACHE`) and shared by every project.
-If a project updates its submodule to an EmuMD version whose Hatari patch
-changed, `mdfw run` says so; `mdfw hatari` rebuilds it.
+If a project updates its submodule to an EmuMD version that needs another
+Hatari, `mdfw run` says so; `mdfw hatari` rebuilds it.
 
 Any other checkout works too: put its `tools/` on your `PATH`, or link
 `tools/mdfw` somewhere that is; `mdfw` finds the rest from its own location.
@@ -108,7 +108,7 @@ grep -q "my firmware is ready" boot.log
 | `mdfw run --headless ...` | The same with no window or sound, as fast as possible, for scripts and CI (see below) |
 | `mdfw info FILE.mdfw` | Shows a `.mdfw`'s name, version and interface |
 | `mdfw cart IMAGE -o cart.h` | Turns a raw cartridge image into a C array of ST words for `mdfw_rom4_load()` |
-| `mdfw hatari` | Builds the patched Hatari (same as `make hatari`) |
+| `mdfw hatari` | Builds EmuMD's Hatari (same as `make hatari`) |
 | `mdfw skill install [--user]` | Gives coding agents the EmuMD skill (see [Coding agents](#coding-agents)) |
 
 `mdfw run` uses `$EMUMD_HATARI`, or `hatari` in `mdfw.ini`'s `[run]`
@@ -486,9 +486,11 @@ page of its own on port 80 (`make run`, `make run URL=http://...`, or
 
 ## Hatari
 
-`hatari/` holds a patch for Hatari 2.6.1 and the files it adds;
-`hatari/build-hatari.sh` (or `make hatari`, or `mdfw hatari`) clones Hatari
-into `~/.cache/emumd/hatari`, applies it and builds. It also downloads
+EmuMD runs in its own fork of Hatari: Hatari 2.6.1, with Multi-device
+support and the other changes below as a commit each, on the `emumd`
+branch of [neilrackett/hatari](https://github.com/neilrackett/hatari).
+`hatari/build-hatari.sh` (or `make hatari`, or `mdfw hatari`) fetches the
+commit it names into `~/.cache/emumd/hatari-fork` and builds it. It also downloads
 the 256k EmuTOS 1.4 images, in every language, into
 `~/.cache/emumd/emutos-256k-1.4`. New options,
 also kept in a `[MultiDevice]` section of `hatari.cfg`:
@@ -502,7 +504,7 @@ also kept in a `[MultiDevice]` section of `hatari.cfg`:
 
 A `.mdfw` given as Hatari's last argument is loaded as the firmware.
 
-The patch also adds `leftdown`, `leftup` and `mousemove <dx> <dy>` to the
+The fork also adds `leftdown`, `leftup` and `mousemove <dx> <dy>` to the
 events Hatari's `--cmd-fifo` takes (`hatari-event <event>`), so scripts
 and coding agents can use the ST's mouse as well as its keyboard.
 `mousemove` is relative and in ST pixels: move far up and left first to
@@ -546,6 +548,7 @@ from there; other agents that read skills can be pointed at the same folder.
 
 ## Licence
 
-GPL-3.0-or-later ([LICENSE](../LICENSE)), except the files that go into Hatari
-(`hatari/`, and `include/emumd_plugin.h`, which both sides share), which
-are GPL-2.0-or-later like Hatari ([hatari/COPYING](../hatari/COPYING)).
+GPL-3.0-or-later ([LICENSE](../LICENSE)), except `hatari/build-hatari.sh` and
+`include/emumd_plugin.h` (which both sides share, the fork with its own
+copy), which are GPL-2.0-or-later like Hatari
+([hatari/COPYING](../hatari/COPYING)).

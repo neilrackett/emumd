@@ -84,4 +84,4 @@ Think you can help? Got an idea of your own? We'd love to hear from you, so why 
 
 ## License
 
-The source code of the project is licensed under the GNU General Public License v3.0. The full license is accessible in the [LICENSE](LICENSE) file. The files that are built into Hatari are licensed under the GNU General Public License v2.0 or later, like Hatari itself (see [hatari/COPYING](hatari/COPYING)).
+The source code of the project is licensed under the GNU General Public License v3.0. The full license is accessible in the [LICENSE](LICENSE) file. The Hatari build script and `include/emumd_plugin.h`, which Hatari shares, are licensed under the GNU General Public License v2.0 or later, like Hatari itself (see [hatari/COPYING](hatari/COPYING)). EmuMD's Hatari is [a fork of Hatari](https://github.com/neilrackett/hatari) (its `emumd` branch).
