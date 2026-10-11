@@ -170,8 +170,9 @@ options with `-O key=value`, and raw Hatari options after `--`.
   `hatari-event keypress 28` (ST scancodes; `keydown`/`keyup` to hold)
   to FILE while it runs. Use `keypress` for typing: with `--headless`'s
   fast-forward, a host pause between `keydown` and `keyup` lasts long
-  enough for TOS to repeat the key. `keypress 0` is scancode 0, not the
-  digit (that is 11).
+  enough for TOS to repeat the key. Hatari reads a one-character key as
+  that character, so `keypress 1` types the digit 1 rather than sending
+  scancode 1 (ESC): give single-digit scancodes in hex, `keypress 0x01`.
 - To use the mouse, write `hatari-event mousemove DX DY` (relative, in ST
   pixels), `leftdown` and `leftup` to the same FILE. Pin the pointer
   first, e.g. `mousemove -100 0` four times then `mousemove 0 -100` three

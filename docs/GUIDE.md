@@ -134,7 +134,9 @@ For scripts, CI and agents, `mdfw run` can run unattended:
 If Hatari crashes (the firmware's own crash, often, or the `abort()` of a
 failed assertion or `panic()`), `mdfw run` says so and exits non-zero.
 To type into the ST from a script, pass Hatari `-- --cmd-fifo FILE` and
-write `hatari-event keypress 28` (an ST scancode) to the file.
+write `hatari-event keypress 28` (an ST scancode) to the file. A
+one-character key is typed as that character, so give single-digit
+scancodes in hex: `keypress 0x01` is ESC, `keypress 1` the digit 1.
 
 ### mdfw.ini
 
