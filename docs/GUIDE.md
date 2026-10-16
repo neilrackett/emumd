@@ -200,9 +200,11 @@ Everything is built as the Pico SDK builds for a host: `PICO_BUILD=1`
 and `PICO_ON_DEVICE=0` are defined, as is `EMUMD=1` for anything that
 has to differ, and enums are the RP2040's sizes (`-fshort-enums`), so
 structures kept in flash or shared memory are laid out as on the
-device. `_FORTIFY_SOURCE` is off, as on the RP2040: firmware treats its
-linker symbols (`extern unsigned int __rom_in_ram_start__`) as the
-regions they start, which its checks would stop as overflows.
+device. Plain `char` is unsigned, as it is on the RP2040
+(`-funsigned-char`), so a byte above 127 means the same thing in both.
+`_FORTIFY_SOURCE` is off, as on the RP2040: firmware treats its linker
+symbols (`extern unsigned int __rom_in_ram_start__`) as the regions
+they start, which its checks would stop as overflows.
 
 ## Preparing a firmware
 

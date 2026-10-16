@@ -169,11 +169,15 @@ def compile_flags(proj):
     """Flags for both languages; std_flags() adds the language standard."""
     # -fshort-enums: enums take the RP2040's sizes (arm-none-eabi's), so the
     # structures a firmware keeps in flash or shared memory are laid out
-    # the same.
+    # the same. -funsigned-char: plain char is unsigned on the RP2040, as
+    # on all ARM, and signed on x86 and on Apple's arm64, so a byte above
+    # 127 in a char (a font's box-drawing glyph, say) would otherwise go
+    # negative here and nowhere else.
     # No _FORTIFY_SOURCE (macOS and Ubuntu turn it on): firmware treats its
     # linker symbols (`extern unsigned int __rom_in_ram_start__`) as the
     # regions they start, which its checks would take for overflows.
-    flags = ["-fPIC", "-fvisibility=hidden", "-fshort-enums", "-g", "-Wall",
+    flags = ["-fPIC", "-fvisibility=hidden", "-fshort-enums", "-funsigned-char",
+             "-g", "-Wall",
              "-Wno-unused-function", "-Wno-missing-braces",
              "-U_FORTIFY_SOURCE", "-D_FORTIFY_SOURCE=0"] + proj.cflags
     # Your shims, then the runtime's (they replace the Pico SDK, FatFs and
