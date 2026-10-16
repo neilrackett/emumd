@@ -10,7 +10,9 @@ running and testing in Hatari) is in [docs/GUIDE.md](docs/GUIDE.md), and
 - `tools/mdfw`: the command line (Python, standard library only).
 - `runtime/`: what every `.mdfw` is built with. Stand-ins for the Pico SDK,
   flash, FatFs, core 1 and the cartridge bus. `runtime/template` covers the
-  SidecarTridge template's hardware, and `runtime/wifi` covers `[wifi]`.
+  SidecarTridge template's hardware, `runtime/wifi` covers `[wifi]`, and
+  `runtime/bluepad32` covers `[bluetooth]` (Bluepad32's platform interface,
+  with scripted pads).
 - `include/emumd_plugin.h`: the interface between Hatari and a `.mdfw`.
 - `hatari/build-hatari.sh`: builds EmuMD's Hatari from the fork (below).
 - `examples/` (hello, wifi), `tests/`, `docs/GUIDE.md`, `skills/emumd/`.
@@ -52,8 +54,8 @@ and `PLUGIN_ABI` in `tools/mdfw` with it.
 
 ## Testing
 
-- `make test`: the runtime and a firmware's `main()`. `make test-wifi`
-  needs libslirp.
+- `make test`: the runtime, a firmware's `main()` and Bluetooth's scripted
+  pads (`make test-bluetooth` on its own). `make test-wifi` needs libslirp.
 - `make example`, then run it headless and look at the screenshot:
   `cd examples/hello && ../../tools/mdfw run --headless --frames 400 --screenshot out.png`.
 - Real firmware, against this checkout:

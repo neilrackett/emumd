@@ -52,7 +52,7 @@ If your firmware is built on the [SidecarTridge microfirmware template](https://
 
 Otherwise, in `mdfw.ini` you list the C files that make up your firmware's logic, leaving out anything that sets up hardware (PIO, DMA, clocks, the SD card driver), and `emu/mdfw_app.c` does what your `main()` does once the hardware is ready. `mdfw run --headless` runs it without a window and can save a screenshot, which is handy for automated tests, and `--record out.avi` records video and sound. In Hatari's window, Cmd+A (AltGr+A on Linux) starts and stops a recording, and Cmd+O or F12 opens its options.
 
-If your firmware uses the Pico W's Wi-Fi, add a `[wifi]` section to `mdfw.ini` and it'll work too, through your computer's own network connection: joining any network succeeds, and the firmware's own lwIP code gets DHCP, DNS and the internet, with nothing to set up. The [Wi-Fi example](examples/wifi) joins, fetches a web page for the ST to print, and serves one of its own.
+If your firmware uses the Pico W's Wi-Fi, add a `[wifi]` section to `mdfw.ini` and it'll work too, through your computer's own network connection: joining any network succeeds, and the firmware's own lwIP code gets DHCP, DNS and the internet, with nothing to set up. The [Wi-Fi example](examples/wifi) joins, fetches a web page for the ST to print, and serves one of its own. A firmware that takes Bluetooth controllers through [Bluepad32](https://github.com/ricardoquesada/bluepad32) gets a `[bluetooth]` section as well, with its pads scripted in place of the radio: a file says when each pad connects, what it presses and when it goes.
 
 You can also load a `.mdfw` into Hatari yourself, with `--md-firmware myapp.mdfw` or by giving it as the last argument, just like a `.prg`.
 

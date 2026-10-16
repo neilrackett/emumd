@@ -115,6 +115,11 @@ class Project:
         if self.wifi and self.wifi_arch not in WIFI_ARCHES:
             fail("%s: [wifi] arch = poll or background" % os.path.basename(self.ini))
         self.lwip_dir = None  # where lwIP is, once build() knows
+        # [bluetooth]: Bluepad32 on the same chip, with scripted controllers.
+        self.bluetooth = cp.has_section("bluetooth")
+        if self.bluetooth and not self.wifi:
+            fail("%s: [bluetooth] needs a [wifi] section too: the Bluetooth controller is "
+                 "the Wi-Fi chip's, brought up by cyw43_arch_init()" % os.path.basename(self.ini))
 
     def get(self, section, key):
         return self.cp.get(section, key, fallback="").strip()
@@ -177,9 +182,11 @@ def compile_flags(proj):
     # lwipopts.h, for Wi-Fi), then lwIP's.
     template_shim = [os.path.join(RUNTIME, "template", "shim")] if proj.template else []
     wifi_shim = [os.path.join(RUNTIME, "wifi", "shim")] if proj.wifi else []
+    bt_shim = [os.path.join(RUNTIME, "bluepad32", "shim")] if proj.bluetooth else []
     lwip_inc = [os.path.join(proj.lwip_dir, "src", "include")] if proj.wifi else []
     for inc in (proj.shims + [os.path.join(RUNTIME, "shim")] + template_shim + wifi_shim
-                + [os.path.join(ROOT, "include")] + proj.includes + lwip_inc + [RUNTIME]):
+                + bt_shim + [os.path.join(ROOT, "include")] + proj.includes + lwip_inc
+                + [RUNTIME]):
         flags.append("-I" + inc)
     if proj.template:
         flags += ["-include", os.path.join(RUNTIME, "template", "shim", "emumd_template.h")]
@@ -195,6 +202,9 @@ def compile_flags(proj):
                   "-DCYW43_WL_GPIO_VBUS_PIN=2", "-DPICO_CYW43_SUPPORTED=1",
                   "-DCYW43_LWIP=1", "-DLIB_PICO_CYW43_ARCH=1",
                   "-D" + WIFI_ARCHES[proj.wifi_arch]]
+    if proj.bluetooth:
+        # As a build that links pico_btstack_cyw43 has it.
+        flags.append("-DCYW43_ENABLE_BLUETOOTH=1")
     if proj.template:
         flags += ["-D" + d for d in template_defines(proj)]
     for d in proj.defines:
@@ -337,6 +347,8 @@ def build(proj, verbose=False, jobs=None, clean=False):
         proj.lwip_dir = lwip_source(proj)
         net_cflags, net_libs = slirp_flags()
         srcs += sorted(glob.glob(os.path.join(RUNTIME, "wifi", "*.c"))) + lwip_sources(proj)
+    if proj.bluetooth:
+        srcs += sorted(glob.glob(os.path.join(RUNTIME, "bluepad32", "*.c")))
     flags = compile_flags(proj)
     os.makedirs(proj.build_dir, exist_ok=True)
 
@@ -364,7 +376,7 @@ def build(proj, verbose=False, jobs=None, clean=False):
         r = subprocess.run(cmd, capture_output=True, text=True)
         return src, cmd, r
 
-    failed = wants_wifi = False
+    failed = wants_wifi = wants_bluetooth = False
     with concurrent.futures.ThreadPoolExecutor(jobs or os.cpu_count() or 4) as pool:
         for src, cmd, r in pool.map(cc, work):
             print("  CC   %s" % os.path.relpath(src, source_base(proj, src)[0]))
@@ -376,11 +388,16 @@ def build(proj, verbose=False, jobs=None, clean=False):
                 failed = True
                 wants_wifi |= any(h in r.stderr for h in (
                     "cyw43_arch.h", "cyw43.h", "lwip/", "lwipopts.h", "async_context"))
+                wants_bluetooth |= "'uni.h'" in r.stderr
     if failed:
         if wants_wifi and not proj.wifi:
             sys.stderr.write("\nmdfw: that looks like Wi-Fi code: add [wifi] to %s (see EmuMD's\n"
                              "docs/GUIDE.md, Wi-Fi), or leave the network code out.\n"
                              % os.path.basename(proj.ini))
+        if wants_bluetooth and not proj.bluetooth:
+            sys.stderr.write("\nmdfw: that looks like Bluepad32 code: add [bluetooth] (and [wifi])\n"
+                             "to %s (see EmuMD's docs/GUIDE.md, Bluetooth controllers), or leave\n"
+                             "the controller code out.\n" % os.path.basename(proj.ini))
         fail("compile failed")
     with open(stamp, "w") as f:
         f.write(digest)
@@ -475,6 +492,10 @@ cflags = -O2
 ; apps = http/http_client.c  ; lwIP apps you use, from its src/apps
 ; arch = poll          ; or background (..._lwip_threadsafe_background)
 
+; Bluetooth controllers through Bluepad32, scripted (needs [wifi] too):
+; mdfw run -O pads=pads.txt
+; [bluetooth]
+
 [run]
 ; Defaults for mdfw run.
 ; sd = sd              ; folder standing in for the microSD card
@@ -533,6 +554,12 @@ lwip = pico-sdk/lib/lwip
 arch = {arch}
 """
 
+BLUETOOTH_INI_SECTION = """
+; Bluetooth controllers, through Bluepad32: scripted pads in place of the
+; radio (mdfw run -O pads=pads.txt; see EmuMD's docs/GUIDE.md).
+[bluetooth]
+"""
+
 APP_TEMPLATE = """\
 /*
  * mdfw_app.c - {name} for EmuMD: what the firmware's main() does
@@ -580,8 +607,14 @@ def cmd_init(args):
     template = (os.path.isfile(os.path.join(d, "uuid.txt"))
                 and os.path.isfile(os.path.join(d, "rp", "src", "main.c")))
     if template:
-        arch = template_wifi_arch(os.path.join(d, "rp", "src", "CMakeLists.txt"))
+        cmakelists = os.path.join(d, "rp", "src", "CMakeLists.txt")
+        arch = template_wifi_arch(cmakelists)
+        bluetooth = template_bluetooth(cmakelists)
+        if bluetooth and not arch:  # the controller is on the Wi-Fi chip
+            arch = "poll"
         wifi = WIFI_INI_SECTION.replace("{arch}", arch) if arch else ""
+        if bluetooth:
+            wifi += BLUETOOTH_INI_SECTION
         files = [(ini, fill(SIDECARTRIDGE_INI_TEMPLATE).replace("{wifi}", wifi))]
         print("  a SidecarTridge template firmware: its own main() runs")
     else:
@@ -618,6 +651,16 @@ def template_wifi_arch(cmakelists):
     if "pico_cyw43_arch_lwip_threadsafe_background" in text:
         return "background"
     return "poll" if "pico_cyw43_arch_lwip_poll" in text else ""
+
+
+def template_bluetooth(cmakelists):
+    """Whether the firmware builds Bluepad32 (Bluetooth controllers)."""
+    try:
+        with open(cmakelists) as f:
+            lines = [l.split("#", 1)[0] for l in f]
+    except OSError:
+        return False
+    return "bluepad32" in " ".join(lines).lower()
 
 
 def git_root(path):

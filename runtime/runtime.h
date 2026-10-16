@@ -40,6 +40,12 @@ void mdfw_runtime_async_turn(void);
 void mdfw_runtime_wifi_pace(uint64_t now_us);
 void mdfw_runtime_wifi_power_off(void);
 
+/* Bluetooth (runtime/bluepad32, in a firmware built with it; no-ops
+ * otherwise): the scripted pads' turn, from cyw43_arch_poll(), and
+ * switching the controller off. */
+void mdfw_runtime_bt_poll(void);
+void mdfw_runtime_bt_power_off(void);
+
 #include <stddef.h>
 void *mdfw_hostdir_open(const char *path);
 void mdfw_hostdir_close(void *d);

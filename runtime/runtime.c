@@ -292,6 +292,9 @@ static void reboot_now(void);
 __attribute__((weak)) void mdfw_runtime_async_turn(void) {}
 __attribute__((weak)) void mdfw_runtime_wifi_pace(uint64_t now_us) { (void)now_us; }
 __attribute__((weak)) void mdfw_runtime_wifi_power_off(void) {}
+/* And by runtime/bluepad32 in one built with Bluetooth. */
+__attribute__((weak)) void mdfw_runtime_bt_poll(void) {}
+__attribute__((weak)) void mdfw_runtime_bt_power_off(void) {}
 
 static void run_main_loop(void) {
   if (!s_on || s_in_loop) return;
@@ -382,6 +385,7 @@ static void plugin_power_off(void) {
   s_on = false;
   stop_main();
   mdfw_runtime_multicore_stop();
+  mdfw_runtime_bt_power_off();
   mdfw_runtime_wifi_power_off();
   mdfw_runtime_timers_reset();
   mdfw_runtime_fatfs_reset();

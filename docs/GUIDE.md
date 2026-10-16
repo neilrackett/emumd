@@ -22,7 +22,8 @@ cartridge bus. So:
 - **Anything below the Pico SDK is not emulated**: PIO programs, DMA, USB,
   pins. Firmware that needs them in its logic will need stand-ins. Wi-Fi
   is the exception: a Pico W's goes through your computer's own network
-  (see [Wi-Fi](#wi-fi)).
+  (see [Wi-Fi](#wi-fi)), and its Bluetooth controllers are scripted (see
+  [Bluetooth controllers](#bluetooth-controllers)).
 
 Running unmodified `.uf2` files would take an RP2040 emulator (both cores,
 PIO, DMA, SPI, the boot ROM) under Hatari; that is on the roadmap, behind
@@ -38,7 +39,7 @@ for macOS, Linux and WSL).
 make hatari      # Hatari 2.6.1 + Multi-device support, and EmuTOS 1.4,
                  # in ~/.cache/emumd
 make             # the example firmware -> examples/hello/build/hello.mdfw
-make test        # the runtime's self-test
+make test        # the runtime's self-test, and Bluetooth's
 make test-wifi   # Wi-Fi's, with the Wi-Fi example (needs libslirp)
 
 cd examples/hello
@@ -173,6 +174,9 @@ lwip = pico-sdk/lib/lwip      ; default: lwIP 2.2.1, downloaded once
 apps = http/http_client.c     ; lwIP apps, from its src/apps
 arch = poll                   ; or background
 
+[bluetooth]                   ; Bluepad32's controllers, scripted (see
+                              ; Bluetooth controllers, below); needs [wifi]
+
 [run]                         ; defaults for mdfw run
 sd = sd                       ; the microSD card folder
 tos = /path/to/tos.img        ; default: EmuTOS 1.4 (UK)
@@ -236,7 +240,9 @@ What EmuMD stands in for:
   ROM3 reads reach the firmware as the PIO and DMA would deliver them,
   through commemul or, in the older template (`init_romemul()` with
   callbacks), the lookup DMA channel's register and its interrupt handler.
-  `reset.h` loses its ARM code.
+  `reset.h` loses its ARM code, and declares MD/Sidepad's
+  `reset_reboot_to_booster()` and its `RESET_BOOSTER_MAGIC` as well, for
+  a `main()` that looks for it in watchdog scratch after a reboot.
 - **The memory map**: `memmap_rp.ld`'s symbols are real ones, at the
   Booster's offsets in EmuMD's flash (`_config_flash_start` is 0x1E0000
   in, and so on), and `__rom_in_ram_start__` is ROM4.
@@ -374,6 +380,7 @@ What stands in for what:
 | DMA | Memory-to-memory transfers happen at once (byte swapping and all); ones paced by the PIO or another peripheral do not. `dma_claim_unused_channel(false)` says none is free, so a caller with a CPU path takes it |
 | Linker-script regions (`memmap_rp.ld`) | Real symbols at the SidecarTridge Booster's offsets in flash, and `__rom_in_ram_start__` at ROM4 |
 | Wi-Fi (CYW43), `cyw43_arch`, `async_context` | With `[wifi]`: any network can be joined, and the chip's frames go to your computer's network (see [Wi-Fi](#wi-fi)) |
+| Bluetooth controllers (Bluepad32 on the CYW43) | With `[bluetooth]`: the platform interface, with pads from a script (see [Bluetooth controllers](#bluetooth-controllers)) |
 | Board ID, `get_rand_32()` & co. | A fixed ID (`--md-option board_id=` for another); your computer's random numbers |
 | GPIO | Pins read high (a template firmware's SELECT, low); writes go nowhere |
 | IRQ set-up, clocks, voltage, PIO headers | Accepted and ignored |
@@ -485,6 +492,105 @@ whenever the ST asks and puts it in ROM4 for the ST to print, and serves a
 page of its own on port 80 (`make run`, `make run URL=http://...`, or
 `-O wifi_forward=tcp:8080:80` and open `http://localhost:8080`).
 `make test-wifi` runs it without Hatari, against a web server of its own.
+
+## Bluetooth controllers
+
+A Pico W firmware that takes game controllers over Bluetooth with
+[Bluepad32](https://github.com/ricardoquesada/bluepad32), as a custom
+platform, runs in EmuMD with scripted controllers in place of the radio.
+Add `[bluetooth]` to `mdfw.ini`, next to `[wifi]` (the Bluetooth
+controller is the Wi-Fi chip's, brought up by `cyw43_arch_init()`, so
+`[bluetooth]` without `[wifi]` is refused), and keep the firmware's
+platform (its `struct uni_platform` and the code that calls `uni_init()`)
+in `[sources]`; leave Bluepad32 and BTstack out, as with lwIP.
+
+```ini
+[wifi]
+arch = poll
+
+[bluetooth]                   ; nothing to set; mdfw init adds it when
+                              ; rp/src/CMakeLists.txt mentions bluepad32
+```
+
+EmuMD stands in for `uni.h`: `struct uni_platform` (every member, so a
+designated initialiser builds as it is), `uni_hid_device_t` with its
+`name`, `controller` and `report_parser`, `uni_gamepad_t` and the
+`DPAD_*`, `BUTTON_*` and `MISC_BUTTON_*` bits, the `uni_bt_*` calls (the
+`_safe` ones wait for the next poll, as calls from another task do; the
+`_unsafe` ones run at once), and `uni_hid_device_get_idx_for_instance()`
+and `_get_instance_for_idx()`, where an index is a place in the device
+table, as in Bluepad32. The firmware's own `sdkconfig.h` is read for
+`CONFIG_BLUEPAD32_MAX_DEVICES` (4 without one). What a platform does not
+use (the console, properties, the HID parsers) is not there, so code that
+calls it fails to build rather than to link.
+
+The pads come from a script, one line per event, named with
+`--md-option pads=FILE` (`mdfw run -O pads=pads.txt`, or
+`options = pads=pads.txt` in `[run]`; it is one option, taking one file):
+
+```
+# ms   slot  what
+0      0     connect Xbox Wireless Controller
+500    0     state buttons=0x1 lx=-512        # A down, stick hard left
+700    0     state buttons=0                  # A up; the stick stays
+1000   1     connect                          # a second pad, unnamed
+1000   1     norumble                         # with no motors
+3000   0     disconnect
+```
+
+| Line | |
+| --- | --- |
+| `MS SLOT connect [NAME]` | A pad arrives in slot `SLOT` (0 to `CONFIG_BLUEPAD32_MAX_DEVICES` - 1): offered to `on_device_discovered` as a gamepad (a platform that declines is obeyed), then `on_device_connected`, `on_device_ready` (anything but `UNI_ERROR_SUCCESS` drops it again, as Bluepad32 does) and one `on_controller_data` at rest. The name is the rest of the line, and empty without one, as Bluepad32 hands some pads |
+| `MS SLOT state KEY=VALUE...` | The pad's report changes and `on_controller_data` is called: `buttons` (`BUTTON_*` bits), `misc` (`MISC_BUTTON_*`), `dpad` (`DPAD_*`), `lx ly rx ry` (the sticks, -512 to 511, 0 at rest), `lt rt` (brake and throttle, 0 to 1023); hex (`0x3`) or decimal. A key not given keeps its value |
+| `MS SLOT disconnect` | `on_device_disconnected`, and the slot is empty |
+| `MS SLOT norumble` | The pad's `report_parser.play_dual_rumble` becomes NULL, as on a pad with no motors |
+
+`MS` is emulated milliseconds from `uni_init()`, so `0` is as soon as
+Bluetooth is up; lines are in time order, `#` starts a comment, and a
+line that is wrong is reported with its number and left out. Events fire
+inside `cyw43_arch_poll()`, where BTstack would fire the callbacks on the
+Pico W, so the firmware has to poll the chip from its main loop, as a
+`pico_cyw43_arch_lwip_poll` firmware does (`arch = background` is not
+covered: nothing polls for it yet).
+
+What the firmware asks of a pad goes to the log, as does the script's
+progress, without `-V`, so a headless run can be checked with `grep` on
+its `--log`:
+
+```
+Sidepad: Bluepad32: scanning
+Sidepad: Bluepad32: pad 0 connected "Xbox Wireless Controller"
+Sidepad: Bluepad32: pad 0 ready
+Sidepad: Bluepad32: pad 0 leds=0x01
+Sidepad: Bluepad32: pad 0 rumble weak=0 strong=200 for 100 ms
+Sidepad: Bluepad32: bonds forgotten
+Sidepad: Bluepad32: pad 0 disconnected
+```
+
+Things to know:
+
+- **There is no radio.** No scanning for real pads, no pairing, no bonds
+  (`uni_bt_del_keys_*` only logs), and no host joystick yet: a controller
+  on your computer does not reach the firmware. `uni_bt_start_scanning_*`
+  logs and sets what `uni_bt_is_scanning()` says; the script's pads
+  connect whether or not the firmware is scanning.
+- **Slots are the script's choice**, where Bluepad32 would give a pad the
+  first free one, so a test can fill slot 2 on its own.
+- **A power cycle** (a cold reset, or `watchdog_reboot()`) switches the
+  chip off, pads and all, with no `on_device_disconnected`, and forgets
+  the platform, as its RAM would be. When the firmware sets it again and
+  calls `uni_init()`, the script is read again and plays from the start,
+  as bonded pads would come back after a reboot. A firmware that keeps an
+  "already initialised" flag across the reboot (its variables keep their
+  values, see above) will not call `uni_init()` again, and has no pads
+  from then on.
+- **`uni_bt_disconnect_device_safe(idx)`** drops the scripted pad in that
+  slot at the next poll. A later `state` line for it is reported as not
+  connected and left out; a later `connect` fills the slot again.
+
+[MD/Sidepad](https://github.com/neilrackett/md-sidepad)'s `controller.c`
+is the platform this was written against. `make test-bluetooth` runs
+EmuMD's own check, with the small platform in `tests/bluepad32_test.c`.
 
 ## Hatari
 

@@ -28,4 +28,11 @@ void reset_jump_to_booster(void);
 void reset_device();
 void reset_deviceAndEraseFlash();
 
+/* Some firmware (MD/Sidepad) reaches the Booster by a watchdog reset
+ * instead, leaving this in watchdog scratch[0] for its main() to find;
+ * its own reset.c has the function, and the scratch survives a reboot
+ * here, so main() then jumps as above. */
+#define RESET_BOOSTER_MAGIC 0xB0057E40u
+void reset_reboot_to_booster(void);
+
 #endif

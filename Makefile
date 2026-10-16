@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 #   make           build the example firmware (examples/hello)
-#   make test      the runtime's self-test
+#   make test      the runtime's self-test, and Bluetooth's
+#   make test-bluetooth  Bluetooth's alone (scripted controllers)
 #   make test-wifi Wi-Fi's, with examples/wifi (needs libslirp)
 #   make hatari    Hatari 2.6.1 with Multi-device support, and EmuTOS 1.4
 #                  (~/.cache/emumd)
@@ -14,7 +15,7 @@ CC ?= cc
 TEST_CFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Wno-unused-parameter \
 	-Iruntime/shim -Iinclude -Iruntime
 
-.PHONY: all example test test-wifi hatari clean
+.PHONY: all example test test-bluetooth test-wifi hatari clean
 all: example
 
 example:
@@ -30,10 +31,22 @@ build/main_test: runtime/*.c runtime/*.h runtime/shim/*.h runtime/shim/*/*.h \
 	@mkdir -p build
 	$(CC) $(TEST_CFLAGS) runtime/*.c tests/main_test.c -lpthread -o $@
 
-test: build/runtime_test build/main_test
-	rm -rf build/test-sd
+build/bluepad32_test: runtime/*.c runtime/*.h runtime/shim/*.h runtime/shim/*/*.h \
+		runtime/bluepad32/*.c runtime/bluepad32/shim/*.h runtime/bluepad32/shim/*/*.h \
+		include/*.h tests/bluepad32_test.c
+	@mkdir -p build
+	$(CC) $(TEST_CFLAGS) -Iruntime/bluepad32/shim runtime/*.c runtime/bluepad32/*.c \
+		tests/bluepad32_test.c -lpthread -o $@
+
+test: build/runtime_test build/main_test build/bluepad32_test
+	rm -rf build/test-sd build/test-pads
 	build/runtime_test build/test-sd
 	build/main_test
+	build/bluepad32_test build/test-pads
+
+test-bluetooth: build/bluepad32_test
+	rm -rf build/test-pads
+	build/bluepad32_test build/test-pads
 
 test-wifi: build/wifi_test
 	$(MDFW) build -f examples/wifi/mdfw.ini
@@ -47,4 +60,5 @@ hatari:
 	hatari/build-hatari.sh
 
 clean:
-	rm -rf build/runtime_test build/main_test build/wifi_test build/test-sd examples/*/build
+	rm -rf build/runtime_test build/main_test build/bluepad32_test build/wifi_test \
+		build/test-sd build/test-pads examples/*/build

@@ -556,6 +556,9 @@ int cyw43_send_ethernet(cyw43_t *self, int itf, size_t len, const void *buf, boo
 
 void cyw43_arch_poll(void) {
   if (s_context) async_context_poll(s_context);
+  /* Bluetooth, in a firmware built with [bluetooth]: BTstack would do its
+   * work here too, so the scripted pads take their turn. */
+  if (s_powered) mdfw_runtime_bt_poll();
 }
 
 void cyw43_arch_wait_for_work_until(absolute_time_t until) {

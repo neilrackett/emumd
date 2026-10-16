@@ -9,8 +9,9 @@ EmuMD builds a Multi-device firmware's own C sources for the host as a
 `.mdfw` (a shared library) and runs it in EmuMD's Hatari, on the emulated
 cartridge port. The firmware's hardware set-up (PIO, DMA, clocks, SD driver)
 is left out; EmuMD's runtime stands in for the Pico SDK, flash, FatFs,
-core 1, the ROM3/ROM4 bus and, with `[wifi]`, the Pico W's Wi-Fi. It is
-not RP2040 emulation: the `.uf2` is not used.
+core 1, the ROM3/ROM4 bus, with `[wifi]` the Pico W's Wi-Fi and, with
+`[bluetooth]`, Bluepad32's controllers (scripted). It is not RP2040
+emulation: the `.uf2` is not used.
 
 ## Find the tool
 
@@ -113,6 +114,25 @@ libglib2.0-dev pkg-config`).
   `network_scan()`, which clang rejects: move them out as static functions
   (they use only globals).
 - Example: `<emumd>/examples/wifi`; `make test-wifi` in EmuMD tests it.
+
+## Bluetooth controllers (Bluepad32)
+
+A firmware that is a Bluepad32 custom platform (`#include "uni.h"`,
+`uni_platform_set_custom()`, `uni_init()`) gets `[bluetooth]` in
+`mdfw.ini`, next to `[wifi]` (required: the controller is the Wi-Fi
+chip's). Keep the platform's source (`controller.c`, say) in `[sources]`
+and leave Bluepad32 and BTstack out. There is no radio: pads come from a
+script, `mdfw run -O pads=pads.txt`, one event a line, `MS SLOT connect
+[NAME]`, `MS SLOT state buttons=0x1 dpad=1 lx=-512 ly=0 rx=0 ry=0 lt=0
+rt=0` (`BUTTON_*`, `DPAD_*` bits; sticks -512 to 511; brake and throttle
+0 to 1023; a key not given keeps its value), `MS SLOT disconnect`, `MS
+SLOT norumble`, with `MS` in emulated milliseconds from `uni_init()`.
+The callbacks fire inside `cyw43_arch_poll()`, so the firmware must poll
+the chip from its loop. The log (no `-V` needed) says `Bluepad32: pad N
+connected "NAME"`, `ready`, `disconnected`, `leds=0xNN`, `rumble weak=W
+strong=S for D ms`, `scanning` and `bonds forgotten`: grep `--log` for
+them. Bad script lines are reported by number. Details: GUIDE.md,
+Bluetooth controllers.
 
 ## Fixing build errors
 
