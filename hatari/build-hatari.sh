@@ -74,10 +74,17 @@ cmake -S "$SRC" -B "$SRC/build" -DCMAKE_BUILD_TYPE=Release \
     -DENABLE_OSX_BUNDLE=$BUNDLE ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} >&2
 cmake --build "$SRC/build" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >&2
 
-# Only the Hatari just built, so mdfw can't run one left from before.
+# Only the Hatari just built, so mdfw can't run one left from before. An
+# app bundle gets a plain hatari beside it as well, a launcher for the
+# bundle, because EmuMDs from before the bundle look only there, and
+# projects pin those. (A script, not a link, so that the bundle is run by
+# its own path and finds its resources.)
 if [ $BUNDLE = 1 ]; then
     HATARI="$SRC/build/src/Hatari.app/Contents/MacOS/Hatari"
-    rm -f "$SRC/build/src/hatari"
+    printf '%s\n' '#!/bin/sh' \
+        'exec "$(dirname "$0")/Hatari.app/Contents/MacOS/Hatari" "$@"' \
+        > "$SRC/build/src/hatari"
+    chmod +x "$SRC/build/src/hatari"
 else
     HATARI="$SRC/build/src/hatari"
     rm -rf "$SRC/build/src/Hatari.app"

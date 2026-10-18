@@ -25,7 +25,9 @@ running and testing in Hatari) is in [docs/GUIDE.md](docs/GUIDE.md), and
 - **Older pins keep working.** Projects pin EmuMD as a submodule and can stay
   on an old version for months. For example, the fork's Hatari builds in
   `~/.cache/emumd/hatari-fork`, so older EmuMDs keep their patched Hatari in
-  `~/.cache/emumd/hatari`.
+  `~/.cache/emumd/hatari`; and where `build-hatari.sh` builds Hatari.app, it
+  leaves a launcher at `build/src/hatari`, the only place EmuMDs from before
+  the bundle look.
 - **Never write inside EmuMD.** When building a firmware, objects and the
   `.mdfw` go to the project's `build/`.
 
