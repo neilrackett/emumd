@@ -622,6 +622,11 @@ pin the pointer to the corner, and later moves land at known positions.
 And `--run-vbls` (`mdfw run --frames`) quits as closing the window does,
 so a recording it ends is a finished file.
 
+With a 68000 CPU, a 68881 or 68882 FPU (`--fpu 68882` after `--machine`)
+is the memory-mapped one of an SFP-004 card or a Mega STE's FPU socket, at
+$FFFA40, as on a real ST or STE. It runs at about the speed of a real
+68882, and the status bar shows it as 68882(SFP-004).
+
 On a GEMDOS drive (`--harddrive`), each program's current folder is its
 own, as it is in TOS: when a program ends, any change it made to it is
 undone. Hatari alone keeps one per drive, so after STinG (which changes
