@@ -628,11 +628,14 @@ undone. Hatari alone keeps one per drive, so after STinG (which changes
 to its own folder, from the AUTO folder) EmuTOS looked there for its
 accessories.
 
-EmuMD's Hatari is built without the macOS app bundle, so it has no menu
-bar: use its shortcuts instead. Cmd+A starts and stops recording video
-(an AVI with sound), Cmd+Y records sound only, and Cmd+O or F12 (fn+F12 on
-most Mac keyboards) opens the options. On Linux, right Alt (AltGr) takes
-the place of Cmd.
+On a Mac with Xcode installed, EmuMD's Hatari is built as an app bundle,
+with Hatari's menu bar: File > Capture starts and stops recordings (and
+shows whether one is running), and the Emulator menu resets the ST.
+Without Xcode (whose `ibtool` builds the menus) it is a plain program
+with no menu bar. Either way, its shortcuts work: Cmd+A starts and stops
+recording video (an AVI with sound), Cmd+Y records sound only, and Cmd+O
+or F12 (fn+F12 on most Mac keyboards) opens the options. On Linux, right
+Alt (AltGr) takes the place of Cmd.
 
 Hatari's own GEMDOS drive emulation needs its own cartridge program at
 $FA0000. When a GEMDOS drive (or an extended VDI mode) is on, Hatari keeps

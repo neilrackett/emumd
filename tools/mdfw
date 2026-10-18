@@ -42,7 +42,11 @@ REPO_URL = "https://github.com/neilrackett/emumd.git"
 CACHE = os.environ.get("EMUMD_CACHE") or os.path.join(
     os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "emumd")
 HATARI_SRC = os.path.join(CACHE, "hatari-fork")
-DEFAULT_HATARI = os.path.join(HATARI_SRC, "build", "src", "hatari")
+# build-hatari.sh builds an app bundle on a Mac with Xcode, else a program.
+DEFAULT_HATARIS = [
+    os.path.join(HATARI_SRC, "build", "src", "Hatari.app", "Contents", "MacOS", "Hatari"),
+    os.path.join(HATARI_SRC, "build", "src", "hatari"),
+]
 # Downloaded by build-hatari.sh too; mdfw run's TOS unless told otherwise.
 DEFAULT_TOS = os.path.join(CACHE, "emutos-256k-1.4", "etos256uk.img")
 # What EmuMD's Hatari is built from (the script names the fork's commit):
@@ -687,8 +691,8 @@ def cmd_build(args):
 
 
 def hatari_path(args, proj=None):
-    for p in (args.hatari, os.environ.get("EMUMD_HATARI"),
-              proj.get("run", "hatari") if proj else "", DEFAULT_HATARI):
+    for p in [args.hatari, os.environ.get("EMUMD_HATARI"),
+              proj.get("run", "hatari") if proj else ""] + DEFAULT_HATARIS:
         if p:
             p = proj.path(p) if (proj and not os.path.isabs(p)) else p
             if os.path.exists(p):
@@ -706,6 +710,8 @@ def hatari_inputs_hash():
 
 def warn_if_stale(hatari):
     """Say so if this Hatari was built from another version of EmuMD."""
+    if os.path.basename(os.path.dirname(hatari)) == "MacOS":  # in an app bundle
+        hatari = os.path.dirname(os.path.dirname(os.path.dirname(hatari)))
     stamp = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(hatari))),
                          ".emumd-stamp")
     if not os.path.exists(stamp):

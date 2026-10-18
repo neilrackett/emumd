@@ -59,15 +59,31 @@ if [ ! -d "$EMUTOS" ]; then
     mv "$TMP/emutos-256k-$EMUTOS_VERSION" "$EMUTOS"
 fi
 
+# On a Mac with Xcode (whose ibtool builds Hatari's menus), Hatari is an
+# app bundle with its menu bar; otherwise a plain program, used through its
+# shortcuts.
 ARCH_ARGS=()
+BUNDLE=0
 if [ "$(uname -s)" = "Darwin" ]; then
     ARCH_ARGS=(-DCMAKE_OSX_ARCHITECTURES="$(uname -m)")
+    if xcrun --find ibtool >/dev/null 2>&1; then
+        BUNDLE=1
+    fi
 fi
 cmake -S "$SRC" -B "$SRC/build" -DCMAKE_BUILD_TYPE=Release \
-    -DENABLE_OSX_BUNDLE=0 ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} >&2
+    -DENABLE_OSX_BUNDLE=$BUNDLE ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} >&2
 cmake --build "$SRC/build" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >&2
+
+# Only the Hatari just built, so mdfw can't run one left from before.
+if [ $BUNDLE = 1 ]; then
+    HATARI="$SRC/build/src/Hatari.app/Contents/MacOS/Hatari"
+    rm -f "$SRC/build/src/hatari"
+else
+    HATARI="$SRC/build/src/hatari"
+    rm -rf "$SRC/build/src/Hatari.app"
+fi
 
 # What it was built from, for mdfw run to compare (same files, same order).
 cat "$HERE/build-hatari.sh" "$ROOT/include/emumd_plugin.h" | sha1 > "$SRC/.emumd-stamp"
 echo "EmuTOS $EMUTOS_VERSION: $EMUTOS/etos256uk.img (and other languages)" >&2
-echo "$SRC/build/src/hatari"
+echo "$HATARI"
