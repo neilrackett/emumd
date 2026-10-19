@@ -640,7 +640,9 @@ Without Xcode (whose `ibtool` builds the menus) it is a plain program
 with no menu bar. Either way, its shortcuts work: Cmd+A starts and stops
 recording video (an AVI with sound), Cmd+Y records sound only, and Cmd+O
 or F12 (fn+F12 on most Mac keyboards) opens the options. On Linux, right
-Alt (AltGr) takes the place of Cmd.
+Alt (AltGr) takes the place of Cmd. In the options, Recording takes
+screenshots and records video and sound, as in Hatari builds newer than
+2.6.1.
 
 Hatari's own GEMDOS drive emulation needs its own cartridge program at
 $FA0000. When a GEMDOS drive (or an extended VDI mode) is on, Hatari keeps
