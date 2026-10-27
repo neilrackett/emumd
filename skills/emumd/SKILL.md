@@ -29,6 +29,10 @@ version the firmware was tested with):
 git submodule add https://github.com/neilrackett/emumd.git emu/emumd
 ```
 
+When updating the submodule, delete any glue the newer EmuMD now provides
+(listed in the GUIDE, under the project layout), such as a firmware's own
+`commemul_scan()`.
+
 ## Porting a firmware
 
 If the firmware is on the SidecarTridge microfirmware template (a
@@ -75,8 +79,9 @@ Otherwise:
      `mdfw cart image.bin -o cart.h`).
    - Wherever the firmware takes the ROM4 RAM address (ROM_IN_RAM,
      `0x20030000`, a `rom_base` argument), pass `mdfw_rom4_base()`.
-   - ROM3: template code using `commemul_init()`/`commemul_poll()` works
-     unchanged; otherwise `mdfw_rom3_set_irq()` + `mdfw_rom3_pop()`.
+   - ROM3: template code using `commemul_init()`/`commemul_poll()` (and
+     `commemul_scan()`) works unchanged; otherwise `mdfw_rom3_set_irq()` +
+     `mdfw_rom3_pop()`.
    - Name/version: `MDFW_NAME` / `MDFW_VERSION` come from `mdfw.ini`.
 5. `mdfw build`, then fix what it reports (next section) until it links.
 6. Run it headlessly and look (below). Also `mdfw info build/<name>.mdfw`.
@@ -141,6 +146,7 @@ Bluetooth controllers.
 | `'hardware/xyz.h' file not found` (or another SDK header) | Leave out the source that needs it, or add a minimal header in a shims folder (`[compile] shims = emu/shim`) |
 | Linker-script symbols (`__flash_binary_end`, `_pack_flash_start`, config/ROM addresses) | A shim `constants.h` (or similar) defining them on `mdfw_flash[offset]` (2 MB, `XIP_BASE` = its address) or `mdfw_rom4()` |
 | `Undefined symbols` / `undefined reference` at link | A left-out file defines it: add the file if it is logic, else stub the function in `emu/mdfw_app.c` |
+| `duplicate symbol` / `multiple definition` at link, after updating EmuMD | EmuMD now provides it (`commemul_scan`, say): delete the project's own copy from its glue |
 | Code needs core 1 | `multicore_launch_core1` runs it as a host thread. For determinism a firmware's own "run a job on core 1" helper can run jobs inline in the glue instead |
 | `__not_in_flash_func`, `tight_loop_contents`, `__dmb`... | Already provided by `pico.h`; include it |
 | A stand-in header is ignored: another header in the firmware's folder includes the original in quotes | Give the stand-in the original's include guard and force-include it first: `cflags = -include prefix.h`, the prefix in the shims folder |

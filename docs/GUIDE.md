@@ -86,6 +86,13 @@ folder when building your firmware: objects and the `.mdfw` go to your
 If a project updates its submodule to an EmuMD version that needs another
 Hatari, `mdfw run` says so; `mdfw hatari` rebuilds it.
 
+When you update it, delete any stand-in of your own that EmuMD now
+provides: the link fails with a duplicate symbol until you do. So far:
+
+- `commemul_scan()`, MD/DOOM's addition to the template's `commemul.c`,
+  which firmwares that refill audio on the ST's frame ack have copied:
+  MD/DOOM's is in `emu/mdfw_app.c`.
+
 Any other checkout works too: put its `tools/` on your `PATH`, or link
 `tools/mdfw` somewhere that is; `mdfw` finds the rest from its own location.
 
@@ -348,7 +355,8 @@ one as well) still run on the emulator's thread.
 
 Firmware built on the SidecarTridge template reads ROM3 through
 `commemul.h`; EmuMD provides `commemul_init()` and `commemul_poll()`
-(and the `commemul_set_irq_handler()` hook), so that code works unchanged.
+(and the `commemul_set_irq_handler()` hook and `commemul_scan()`, a look
+at the ring without draining it), so that code works unchanged.
 Anything else can use `mdfw_rom3_set_irq()` and `mdfw_rom3_pop()`.
 
 The [ROTT Accelerator](https://github.com/neilrackett/atarist-rott/tree/atarist/sidecart)

@@ -5,9 +5,10 @@
  * File: main_test.c
  * Description: Checks a firmware whose main loop never returns
  *              (mdfw_app.main): its own thread, sleeps that wait for
- *              emulated time, the ROM3 ring and peek across threads,
- *              timers and alarms, semaphores, watchdog scratch across a
- *              reboot, and stopping the threads at power-off.
+ *              emulated time, the ROM3 ring, peek and commemul_scan
+ *              across threads, timers and alarms, semaphores, watchdog
+ *              scratch across a reboot, and stopping the threads at
+ *              power-off.
  *
  *   main_test
  */
@@ -69,6 +70,7 @@ static void got_sample(uint16_t v) {
 }
 
 extern void commemul_poll(void (*cb)(uint16_t));
+extern bool commemul_scan(uint32_t *cursor, uint16_t window_hi);
 
 static int app_init(void) {
   s_boots++;
@@ -132,6 +134,18 @@ int main(void) {
   CHECK(mdfw_rom3_peek(&cursor, &v) && v == 0x8402);
   CHECK(mdfw_rom3_peek(&cursor, &v) && v == 0x8403);
   CHECK(!mdfw_rom3_peek(&cursor, &v));
+
+  /* commemul_scan says whether a read in one window has arrived since
+   * its cursor, and takes nothing from the ring either. */
+  CHECK(!commemul_scan(&cursor, 0x8400u));
+  p->rom3_read(0x8600, 14000);
+  CHECK(!commemul_scan(&cursor, 0x8400u));
+  p->rom3_read(0x8401, 14000);
+  p->rom3_read(0x8601, 14000);
+  CHECK(commemul_scan(&cursor, 0x8400u));
+  CHECK(!commemul_scan(&cursor, 0x8400u));
+  uint32_t from_start = 0;
+  CHECK(commemul_scan(&from_start, 0x8600u));
 
   /* Timers and alarms fire on the emulator's thread in emulated time. */
   CHECK(add_repeating_timer_us(-1000, on_timer, NULL, &s_timer));
