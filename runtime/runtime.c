@@ -211,12 +211,14 @@ const char *mdfw_option(const char *key) {
   static char value[1024];
   const size_t klen = strlen(key);
   const char *p = s_options;
-  /* The last one given wins; a bare "key" means "1". */
+  /* The last one given wins; a bare "key" means "1". They come one per
+   * line, or as Hatari keeps them (--md-option, hatari.cfg), separated by
+   * semicolons, so either ends one. */
   const char *found = NULL;
   size_t found_len = 0;
   while (*p) {
-    const char *eol = strchr(p, '\n');
-    const size_t len = eol ? (size_t)(eol - p) : strlen(p);
+    const size_t len = strcspn(p, "\n;");
+    const char *eol = p[len] ? p + len : NULL;
     if (len > klen && p[klen] == '=' && strncmp(p, key, klen) == 0) {
       found = p + klen + 1;
       found_len = len - klen - 1;

@@ -80,7 +80,7 @@ int main(int argc, char **argv) {
   const emumd_plugin_t *p = emumd_plugin_v1();
   CHECK(p->abi == EMUMD_PLUGIN_ABI);
   CHECK(strcmp(p->name, "test") == 0);
-  const emumd_host_t host = {EMUMD_PLUGIN_ABI, sd, "a=1\nb=hello world\nflag\nb=last\nempty=",
+  const emumd_host_t host = {EMUMD_PLUGIN_ABI, sd, "a=1\nb=hello world\nflag;sd=x\nb=last;empty=",
                              1, host_log};
   CHECK(p->power_on(&host, 1000) == 0);
 
@@ -89,6 +89,7 @@ int main(int argc, char **argv) {
   CHECK(strcmp(mdfw_option("b"), "last") == 0);
   CHECK(strcmp(mdfw_option("flag"), "1") == 0);
   CHECK(strcmp(mdfw_option("empty"), "") == 0);
+  CHECK(strcmp(mdfw_option("sd"), "x") == 0); /* after a semicolon, as Hatari joins them */
   CHECK(mdfw_option("missing") == NULL);
 
   /* ROM4 / ROM3 / time */
