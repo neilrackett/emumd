@@ -552,6 +552,7 @@ cflags = -O2
 [run]
 machine = ste
 sd = build/sd          ; the microSD card: a folder (made if need be)
+; options = select=20000 ; press SELECT 20 s in (EmuMD's docs/GUIDE.md)
 """
 
 WIFI_INI_SECTION = """

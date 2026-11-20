@@ -192,6 +192,10 @@ options with `-O key=value`, and raw Hatari options after `--`.
 - The ST's text screen is 40 columns in low resolution.
 - The emulated Multi-device is infinitely fast: do not draw conclusions
   about speed or timeouts; that needs real hardware.
+- To press the Multi-device's SELECT button (template firmware):
+  `-O select=MS[+HOLD],...`, e.g. `-O select=20000` taps it 20 s of
+  emulated time after Hatari started, `-O select=5000+11000` holds it for
+  11 s (a long press). Several `-O` options can be given.
 - To type into the ST: `-- --cmd-fifo FILE`, then write
   `hatari-event keypress 28` (ST scancodes; `keydown`/`keyup` to hold)
   to FILE while it runs. Use `keypress` for typing: with `--headless`'s

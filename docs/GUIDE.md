@@ -255,7 +255,8 @@ What EmuMD stands in for:
 - **The memory map**: `memmap_rp.ld`'s symbols are real ones, at the
   Booster's offsets in EmuMD's flash (`_config_flash_start` is 0x1E0000
   in, and so on), and `__rom_in_ram_start__` is ROM4.
-- **The SELECT button**, which is never pressed.
+- **The SELECT button**, pressed when `--md-option select=` says (see
+  [Pressing SELECT](#pressing-select)) and never otherwise.
 - **The Booster**: on blank flash, EmuMD does what its first run would
   (this app boots, and has the first settings sector), and gives a Wi-Fi
   firmware a network name to join. A jump to the Booster stops the
@@ -276,6 +277,30 @@ if you write one, replaces EmuMD's.
 [MD/JS](https://github.com/neilrackett/md-js) and
 [MD/Net](https://github.com/neilrackett/md-net) are built this way, Wi-Fi
 and all; each has an `emu/test.sh` that drives it from an ST program.
+
+#### Pressing SELECT
+
+The Multi-device's SELECT button is pressed on a schedule, given with
+`--md-option select=` (`mdfw run -O select=...`, or `options =
+select=...` in `[run]`):
+
+```
+select=20000              # a tap 20 s in
+select=20000,24000        # two taps
+select=5000+11000         # held for 11 s from 5 s in: a long press
+select=0+3000             # held from power-on: the escape to the Booster
+```
+
+Each press is `MS[+HOLD]`: SELECT goes down `MS` milliseconds of emulated
+time after Hatari started and stays down for `HOLD` ms (200 without one).
+That clock runs on through resets and reboots, so a press that makes the
+firmware reboot is not pressed again. `select_detectPush()` and SELECT's
+GPIO read the schedule, and `select_waitPush()`, `select_coreWaitPush()`
+and `select_checkPushReset()` debounce it and call the short or long
+press callback as `select.c` does, with the firmware's own
+`SELECT_DEBOUNCE_MS` and `SELECT_LONG_RESET`. Without the option they do
+what they always have here: nothing is pressed, `select_waitPush()` never
+returns and `select_coreWaitPush()` leaves core 1 alone.
 
 ### Any other firmware
 
@@ -392,7 +417,7 @@ What stands in for what:
 | Wi-Fi (CYW43), `cyw43_arch`, `async_context` | With `[wifi]`: any network can be joined, and the chip's frames go to your computer's network (see [Wi-Fi](#wi-fi)) |
 | Bluetooth controllers (Bluepad32 on the CYW43) | With `[bluetooth]`: the platform interface, with pads from a script (see [Bluetooth controllers](#bluetooth-controllers)) |
 | Board ID, `get_rand_32()` & co. | A fixed ID (`--md-option board_id=` for another); your computer's random numbers |
-| GPIO | Pins read high (a template firmware's SELECT, low); writes go nowhere |
+| GPIO | Pins read high (a template firmware's SELECT, low unless `select=` presses it); writes go nowhere |
 | IRQ set-up, clocks, voltage, PIO headers | Accepted and ignored |
 
 The firmware's `poll` runs on Hatari's thread whenever the ST reads the
